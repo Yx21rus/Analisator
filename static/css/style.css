@@ -1,0 +1,1335 @@
+/* ============================================================
+   ОСНОВНЫЕ СТИЛИ
+   ============================================================ */
+:root {
+    --primary-color: #2C3E50;
+    --secondary-color: #3498DB;
+    --success-color: #2ECC71;
+    --warning-color: #F39C12;
+    --danger-color: #E74C3C;
+    --dark-color: #1a1a2e;
+    --light-bg: #f0f2f5;
+    --card-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+    --card-shadow-hover: 0 15px 40px rgba(0, 0, 0, 0.2);
+    --border-radius: 15px;
+    --transition-speed: 0.3s;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    background: var(--light-bg);
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+/* ============================================================
+   НАВИГАЦИЯ
+   ============================================================ */
+.navbar-custom {
+    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+    padding: 1rem 0;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+}
+
+.navbar-custom .navbar-brand {
+    color: white !important;
+    font-weight: 700;
+    font-size: 1.5rem;
+    letter-spacing: 0.5px;
+}
+
+.navbar-custom .navbar-brand i {
+    margin-right: 12px;
+    font-size: 1.8rem;
+}
+
+.navbar-custom .navbar-text {
+    color: rgba(255, 255, 255, 0.9) !important;
+    font-size: 0.9rem;
+}
+
+.navbar-custom .navbar-text i {
+    margin-right: 8px;
+}
+
+/* ============================================================
+   КАРТОЧКИ
+   ============================================================ */
+.card {
+    border: none;
+    border-radius: var(--border-radius);
+    box-shadow: var(--card-shadow);
+    transition: transform var(--transition-speed) ease, 
+                box-shadow var(--transition-speed) ease;
+    margin-bottom: 20px;
+    overflow: hidden;
+}
+
+.card:hover {
+    transform: translateY(-5px);
+    box-shadow: var(--card-shadow-hover);
+}
+
+.card-header {
+    background: linear-gradient(135deg, var(--secondary-color), var(--primary-color));
+    color: white;
+    border-radius: var(--border-radius) var(--border-radius) 0 0 !important;
+    padding: 1rem 1.5rem;
+    font-weight: 600;
+    font-size: 1.1rem;
+    border: none;
+}
+
+.card-header i {
+    margin-right: 10px;
+}
+
+.card-body {
+    padding: 1.5rem;
+    background: white;
+}
+
+/* ============================================================
+   ЗАГОЛОВКИ КАРТОЧЕК ОТЧЕТОВ - ИНВЕРТИРОВАННЫЕ
+   ============================================================ */
+div.report-card > div.card-header.d-flex.justify-content-between.align-items-center {
+    background: #0d1117 !important;
+    background: linear-gradient(135deg, #0d1117 0%, #161b22 50%, #1a1a2e 100%) !important;
+    color: #ffffff !important;
+    border-bottom: 3px solid #58a6ff !important;
+    padding: 12px 20px !important;
+    border-radius: 12px 12px 0 0 !important;
+}
+
+div.report-card > div.card-header.d-flex.justify-content-between.align-items-center * {
+    color: #ffffff !important;
+}
+
+div.report-card > div.card-header.d-flex.justify-content-between.align-items-center i.bi-folder {
+    color: #f0883e !important;
+    font-size: 1.2rem !important;
+}
+
+div.report-card > div.card-header.d-flex.justify-content-between.align-items-center strong,
+div.report-card > div.card-header.d-flex.justify-content-between.align-items-center [id^="reportTitle_"] {
+    color: #131111 !important;
+    font-size: 1rem !important;
+    font-weight: 700 !important;
+    background: rgb(248, 246, 246) !important;
+    padding: 4px 16px !important;
+    border-radius: 6px !important;
+    font-family: 'Consolas', 'Courier New', monospace !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+
+div.report-card > div.card-header.d-flex.justify-content-between.align-items-center .level-badge,
+div.report-card > div.card-header.d-flex.justify-content-between.align-items-center .badge.bg-secondary {
+    background: rgba(255, 255, 255, 0.12) !important;
+    color: #ffffff !important;
+    border: 1px solid rgba(255, 255, 255, 0.15) !important;
+    font-weight: 600 !important;
+    padding: 4px 14px !important;
+    border-radius: 20px !important;
+}
+
+div.report-card > div.card-header.d-flex.justify-content-between.align-items-center .btn-danger {
+    background: rgba(231, 76, 60, 0.7) !important;
+    border: 1px solid rgba(255, 255, 255, 0.15) !important;
+    border-radius: 50% !important;
+    width: 34px !important;
+    height: 34px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 0 !important;
+    transition: all 0.3s ease !important;
+}
+
+div.report-card > div.card-header.d-flex.justify-content-between.align-items-center .btn-danger:hover {
+    background: #e74c3c !important;
+    transform: rotate(90deg) scale(1.1) !important;
+}
+
+div.report-card > div.card-header.d-flex.justify-content-between.align-items-center .btn-danger i {
+    color: #ffffff !important;
+    font-size: 1.2rem !important;
+}
+
+div.report-card > div.card-header.d-flex.justify-content-between.align-items-center span:first-child {
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    flex: 1 !important;
+}
+
+/* ============================================================
+   КНОПКИ
+   ============================================================ */
+.btn-primary {
+    background: linear-gradient(135deg, var(--secondary-color), var(--primary-color));
+    border: none;
+    padding: 10px 30px;
+    font-weight: 600;
+    border-radius: 25px;
+    transition: all var(--transition-speed) ease;
+}
+
+.btn-primary:hover {
+    transform: scale(1.03);
+    box-shadow: 0 5px 25px rgba(52, 152, 219, 0.4);
+    background: linear-gradient(135deg, #2980b9, #2C3E50);
+}
+
+.btn-primary:active {
+    transform: scale(0.97);
+}
+
+.btn-primary:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+}
+
+.btn-outline-light {
+    border: 2px solid rgba(255, 255, 255, 0.5);
+    color: white;
+    border-radius: 20px;
+    padding: 5px 15px;
+    font-size: 0.9rem;
+    transition: all var(--transition-speed) ease;
+}
+
+.btn-outline-light:hover {
+    background: white;
+    color: var(--primary-color);
+    border-color: white;
+}
+
+/* ============================================================
+   КОНТРАСТНЫЕ ЗАГОЛОВКИ ПУТЕЙ В БОКОВОЙ ПАНЕЛИ
+   ============================================================ */
+.sidebar .folder-tree-header {
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: #1a1a2e;
+    padding: 6px 10px 6px 8px;
+    border-bottom: 3px solid #0d6efd;
+    margin-bottom: 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    user-select: none;
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border-radius: 6px 6px 0 0;
+    transition: all 0.2s ease;
+}
+
+.sidebar .folder-tree-header:hover {
+    background: linear-gradient(135deg, #e9ecef 0%, #dee2e6 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(13, 110, 253, 0.15);
+}
+
+.sidebar .folder-tree-header .path-text {
+    font-weight: 600;
+    font-size: 0.7rem;
+    color: #0d6efd;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 220px;
+    background: rgba(13, 110, 253, 0.08);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-family: 'Consolas', 'Courier New', monospace;
+}
+
+.sidebar .folder-tree-header .badge {
+    font-size: 0.65rem;
+    padding: 3px 10px;
+    background: #0d6efd !important;
+    color: white !important;
+    font-weight: 700;
+    border-radius: 20px;
+    box-shadow: 0 2px 4px rgba(13, 110, 253, 0.3);
+}
+
+/* ============================================================
+   СЕКЦИИ УРОВНЕЙ - КОНТРАСТНЫЕ
+   ============================================================ */
+.chart-section .section-title {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: #1a1a2e;
+    margin-bottom: 10px;
+    padding: 8px 12px;
+    border-bottom: 3px solid #0d6efd;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    background: linear-gradient(135deg, #f8f9fa 0%, #f1f3f5 100%);
+    border-radius: 6px 6px 0 0;
+}
+
+.chart-section .section-title .path-text {
+    font-weight: 600;
+    color: #0d6efd;
+    font-size: 0.8rem;
+    word-break: break-all;
+    background: rgba(13, 110, 253, 0.08);
+    padding: 2px 10px;
+    border-radius: 4px;
+    font-family: 'Consolas', 'Courier New', monospace;
+}
+
+.chart-section .section-title .badge {
+    font-size: 0.7rem;
+    padding: 3px 12px;
+    font-weight: 700;
+    border-radius: 20px;
+}
+
+.chart-section.level-1 .section-title {
+    border-bottom-color: #fd7e14;
+    background: linear-gradient(135deg, #fff5eb 0%, #ffecd6 100%);
+}
+
+.chart-section.level-1 .section-title .path-text {
+    color: #e8590c;
+    background: rgba(253, 126, 20, 0.12);
+}
+
+.chart-section.level-1 .section-title .badge {
+    background: #fd7e14 !important;
+    color: white !important;
+}
+
+.chart-section.level-2 .section-title {
+    border-bottom-color: #0d6efd;
+    background: linear-gradient(135deg, #ebf5ff 0%, #d6eaff 100%);
+}
+
+.chart-section.level-2 .section-title .path-text {
+    color: #0d6efd;
+    background: rgba(13, 110, 253, 0.1);
+}
+
+.chart-section.level-2 .section-title .badge {
+    background: #0d6efd !important;
+    color: white !important;
+}
+
+/* ============================================================
+   УРОВЕНЬ 2 - РАЗДЕЛИТЕЛЬ
+   ============================================================ */
+.level-2-section .level-divider {
+    border: none;
+    border-top: 3px dashed #0d6efd;
+    margin: 20px 0 15px 0;
+    opacity: 0.6;
+}
+
+/* ============================================================
+   СТАТИСТИКА - КОНТРАСТНАЯ
+   ============================================================ */
+.stat-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+.stat-item {
+    flex: 1;
+    min-width: 100px;
+    background: linear-gradient(135deg, #f8f9fa 0%, #f1f3f5 100%);
+    border-radius: 8px;
+    padding: 10px 15px;
+    text-align: center;
+    transition: all var(--transition-speed) ease;
+    border: 1px solid #e9ecef;
+}
+
+.stat-item:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.stat-item .value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.stat-item .label {
+    font-size: 0.75rem;
+    color: #495057;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-top: 4px;
+    font-weight: 600;
+}
+
+/* Цветовые акценты для разных показателей */
+.stat-item .value.green {
+    color: var(--success-color);
+}
+.stat-item .value.orange {
+    color: var(--warning-color);
+}
+.stat-item .value.red {
+    color: var(--danger-color);
+}
+.stat-item:nth-child(1) .value { color: #fd7e14; }
+.stat-item:nth-child(2) .value { color: #2ecc71; }
+.stat-item:nth-child(3) .value { color: #3498db; }
+.stat-item:nth-child(4) .value { color: #9b59b6; }
+
+/* ============================================================
+   ФОРМЫ
+   ============================================================ */
+.form-control {
+    border-radius: 10px;
+    border: 2px solid #e0e0e0;
+    padding: 10px 15px;
+    transition: all var(--transition-speed) ease;
+}
+
+.form-control:focus {
+    border-color: var(--secondary-color);
+    box-shadow: 0 0 0 0.2rem rgba(52, 152, 219, 0.25);
+}
+
+.form-control::placeholder {
+    color: #b0b0b0;
+}
+
+.form-label {
+    font-weight: 600;
+    color: var(--primary-color);
+    font-size: 0.95rem;
+}
+
+/* ============================================================
+   ТЕГИ ПУТЕЙ - КОНТРАСТНЫЕ
+   ============================================================ */
+.path-tag {
+    display: inline-block;
+    background: linear-gradient(135deg, #e9ecef 0%, #dee2e6 100%);
+    padding: 4px 14px;
+    border-radius: 20px;
+    margin: 4px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: #0d6efd;
+    border: 1px solid #ced4da;
+    font-family: 'Consolas', 'Courier New', monospace;
+}
+
+.path-tag .remove-path {
+    cursor: pointer;
+    margin-left: 10px;
+    color: #dc3545;
+    font-weight: 700;
+    font-size: 1.1rem;
+    transition: all 0.2s ease;
+}
+
+.path-tag .remove-path:hover {
+    transform: scale(1.2);
+    color: #c82333;
+}
+
+.empty-paths {
+    color: #6c757d;
+    font-style: italic;
+    margin: 8px 0;
+}
+
+/* ============================================================
+   СПИСОК ПУТЕЙ В ИСТОРИИ
+   ============================================================ */
+#pathsList .list-group-item {
+    border: none;
+    border-radius: 10px !important;
+    margin-bottom: 8px;
+    padding: 15px 20px;
+    background: white;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+    transition: all var(--transition-speed) ease;
+    cursor: pointer;
+}
+
+#pathsList .list-group-item:hover {
+    background: #e8f4fd;
+    transform: translateX(5px);
+    box-shadow: 0 4px 15px rgba(52, 152, 219, 0.2);
+}
+
+#pathsList .list-group-item .badge {
+    background: var(--secondary-color);
+    padding: 5px 12px;
+    border-radius: 20px;
+    font-weight: 500;
+}
+
+#pathsList .list-group-item i {
+    color: var(--secondary-color);
+    margin-right: 10px;
+}
+
+/* ============================================================
+   ТАБЛИЦЫ
+   ============================================================ */
+.table {
+    margin-bottom: 0;
+}
+
+.table thead th {
+    background: var(--primary-color);
+    color: white;
+    font-weight: 600;
+    padding: 12px 15px;
+    border: none;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+.table tbody tr {
+    transition: background var(--transition-speed) ease;
+}
+
+.table tbody tr:hover {
+    background: #f8f9fa;
+}
+
+.table tbody td {
+    padding: 10px 15px;
+    vertical-align: middle;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.table-responsive {
+    max-height: 400px;
+    overflow-y: auto;
+    border-radius: 10px;
+    border: 1px solid #e0e0e0;
+}
+
+/* ============================================================
+   БЭДЖИ
+   ============================================================ */
+.badge-folder {
+    background: var(--secondary-color);
+    color: white;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+}
+
+.badge-file {
+    background: var(--success-color);
+    color: white;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+}
+
+.badge-size {
+    background: #f0f0f0;
+    color: var(--primary-color);
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+}
+
+.level-badge {
+    font-size: 0.8rem;
+    padding: 4px 12px;
+    border-radius: 20px;
+}
+
+/* ============================================================
+   НАВИГАЦИЯ - КОНТРАСТНАЯ
+   ============================================================ */
+.navigation-bar {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    padding: 10px 0;
+    border-bottom: 1px solid #e0e0e0;
+    margin-bottom: 15px;
+    flex-wrap: wrap;
+}
+
+.btn-back {
+    background: linear-gradient(135deg, #28a745 0%, #1e7e34 100%);
+    color: white;
+    border: none;
+    padding: 4px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-weight: 700;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 4px rgba(40, 167, 69, 0.3);
+}
+
+.btn-back:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(40, 167, 69, 0.4);
+}
+
+.btn-back i {
+    margin-right: 4px;
+}
+
+.btn-home {
+    background: linear-gradient(135deg, #0d6efd 0%, #0a58ca 100%);
+    color: white;
+    border: none;
+    padding: 4px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-weight: 700;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 4px rgba(13, 110, 253, 0.3);
+}
+
+.btn-home:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(13, 110, 253, 0.4);
+}
+
+.btn-home i {
+    margin-right: 4px;
+}
+
+/* Хлебные крошки - контрастные */
+.breadcrumb-item a {
+    cursor: pointer;
+    text-decoration: none;
+    color: #0d6efd;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: rgba(13, 110, 253, 0.08);
+    transition: all 0.2s ease;
+}
+
+.breadcrumb-item a:hover {
+    background: rgba(13, 110, 253, 0.15);
+    text-decoration: underline;
+}
+
+.breadcrumb-item.active {
+    color: #1a1a2e;
+    font-weight: 700;
+    background: rgba(13, 110, 253, 0.1);
+    padding: 2px 10px;
+    border-radius: 4px;
+}
+
+/* ============================================================
+   ЭЛЕМЕНТЫ СПИСКА (папки и файлы)
+   ============================================================ */
+.folder-clickable {
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.folder-clickable:hover {
+    background: #e8f4fd;
+}
+
+.folder-clickable i.bi-chevron-right {
+    font-size: 0.8rem;
+    color: #6c757d;
+    margin-left: 6px;
+}
+
+.folder-level2-clickable {
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.folder-level2-clickable:hover {
+    background: #fff3cd;
+}
+
+.folder-level2-clickable i.bi-chevron-right {
+    font-size: 0.8rem;
+    color: #856404;
+    margin-left: 6px;
+}
+
+.file-item {
+    cursor: default;
+}
+
+.folder-icon {
+    color: var(--secondary-color);
+    margin-right: 8px;
+}
+
+.file-icon {
+    color: var(--success-color);
+    margin-right: 8px;
+}
+
+/* ============================================================
+   ЗАГОЛОВКИ СОДЕРЖИМОГО ПАПОК
+   ============================================================ */
+.folders-section .folders-header h6 {
+    font-weight: 700;
+    color: #1a1a2e;
+    font-size: 0.9rem;
+}
+
+.folders-section .folders-header h6 span {
+    color: #0d6efd;
+    font-weight: 700;
+    background: rgba(13, 110, 253, 0.1);
+    padding: 0 8px;
+    border-radius: 4px;
+}
+
+/* ============================================================
+   БОКОВАЯ ПАНЕЛЬ
+   ============================================================ */
+.sidebar .sidebar-header {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #1a1a2e;
+    padding-bottom: 10px;
+    border-bottom: 3px solid #0d6efd;
+    margin-bottom: 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: sticky;
+    top: 0;
+    background: white;
+    z-index: 10;
+}
+
+.sidebar .sidebar-header .badge {
+    font-size: 0.75rem;
+    padding: 4px 12px;
+    background: #0d6efd !important;
+    color: white !important;
+    border-radius: 20px;
+    font-weight: 700;
+}
+
+/* ============================================================
+   ГРАФИКИ
+   ============================================================ */
+.charts-vertical-container {
+    display: flex;
+    flex-direction: column;
+    gap: 25px;
+    width: 100%;
+    margin: 20px 0;
+}
+
+.chart-dynamic {
+    width: 100%;
+}
+
+.chart-dynamic .chart-card {
+    width: 100%;
+    padding: 20px;
+    background: #ffffff;
+    border-radius: 12px;
+    border: 1px solid #e0e0e0;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    transition: all var(--transition-speed) ease;
+}
+
+.chart-dynamic .chart-card:hover {
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+}
+
+.chart-dynamic .chart-card h6 {
+    margin-bottom: 15px;
+    color: var(--secondary-color);
+    font-weight: 600;
+    font-size: 1.1rem;
+}
+
+.chart-dynamic .chart-card h6 i {
+    margin-right: 8px;
+}
+
+.chart-dynamic .chart-card .chart-wrapper {
+    width: 100%;
+    min-height: 400px;
+}
+
+.chart-dynamic .chart-card .chart-wrapper img,
+.chart-dynamic .chart-card .chart-wrapper .plotly-graph-div {
+    width: 100% !important;
+    height: auto !important;
+    max-height: 500px;
+}
+
+.chart-histogram {
+    width: 100%;
+}
+
+.chart-histogram .chart-card {
+    width: 100%;
+    padding: 20px;
+    background: #ffffff;
+    border-radius: 12px;
+    border: 1px solid #e0e0e0;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    transition: all var(--transition-speed) ease;
+}
+
+.chart-histogram .chart-card:hover {
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+}
+
+.chart-histogram .chart-card h6 {
+    margin-bottom: 15px;
+    color: var(--secondary-color);
+    font-weight: 600;
+    font-size: 1.1rem;
+}
+
+.chart-histogram .chart-card h6 i {
+    margin-right: 8px;
+}
+
+.chart-histogram .chart-card .chart-wrapper {
+    width: 100%;
+    min-height: 350px;
+}
+
+.chart-histogram .chart-card .chart-wrapper .plotly-graph-div {
+    width: 100% !important;
+    height: 400px !important;
+}
+
+/* ============================================================
+   УБИРАЕМ СТАРЫЕ КЛАССЫ
+   ============================================================ */
+.chart-row,
+.chart-col,
+.histogram-col,
+.row-charts {
+    display: none !important;
+}
+
+/* ============================================================
+   ГИСТОГРАММА С ГОРИЗОНТАЛЬНЫМ СКРОЛЛОМ
+   ============================================================ */
+.histogram-scroll-wrapper {
+    width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    position: relative;
+    background: white;
+    border-radius: 8px;
+    border: 1px solid #e9ecef;
+    padding: 5px 0;
+}
+
+.histogram-scroll-wrapper::-webkit-scrollbar {
+    height: 14px;
+    background: #f1f1f1;
+    border-radius: 8px;
+}
+
+.histogram-scroll-wrapper::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 8px;
+    margin: 2px;
+}
+
+.histogram-scroll-wrapper::-webkit-scrollbar-thumb {
+    background: linear-gradient(90deg, #0d6efd, #0a58ca);
+    border-radius: 8px;
+    min-width: 60px;
+    border: 2px solid #f1f1f1;
+}
+
+.histogram-scroll-wrapper::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(90deg, #0a58ca, #084298);
+}
+
+.histogram-scroll-wrapper .histogram-inner {
+    min-width: 100%;
+    width: auto;
+    padding: 5px 10px;
+    display: inline-block;
+}
+
+.histogram-scroll-wrapper .histogram-inner .plotly-graph-div {
+    width: 100% !important;
+    height: 400px !important;
+    min-width: 600px;
+}
+
+/* Индикатор скролла */
+.scroll-indicator {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 12px;
+    font-size: 0.75rem;
+    color: #495057;
+    background: #f8f9fa;
+    border-radius: 0 0 8px 8px;
+    border-top: 1px solid #e9ecef;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.scroll-indicator .scroll-arrow {
+    cursor: pointer;
+    padding: 2px 10px;
+    border-radius: 4px;
+    user-select: none;
+    background: #e9ecef;
+    font-size: 1.1rem;
+    transition: all 0.2s ease;
+}
+
+.scroll-indicator .scroll-arrow:hover {
+    background: #dee2e6 !important;
+    transform: scale(1.05);
+}
+
+.scroll-indicator .badge {
+    font-size: 0.6rem;
+    padding: 2px 8px;
+}
+
+/* Стили для текста на столбцах гистограммы */
+.js-plotly-plot .plotly .annotation-text {
+    font-weight: bold !important;
+    text-shadow: 0 1px 2px rgba(255,255,255,0.8);
+}
+
+/* ============================================================
+   ОТЧЕТ
+   ============================================================ */
+.report-card {
+    margin-bottom: 20px;
+    border-left: 4px solid var(--secondary-color);
+}
+
+/* ============================================================
+   ЗАГРУЗКА
+   ============================================================ */
+.loading {
+    display: none;
+    text-align: center;
+    padding: 50px 20px;
+    background: rgba(255, 255, 255, 0.95);
+    border-radius: var(--border-radius);
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 9999;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    min-width: 200px;
+}
+
+.loading .spinner-border {
+    width: 4rem;
+    height: 4rem;
+    color: var(--secondary-color);
+}
+
+.loading p {
+    margin-top: 15px;
+    color: var(--primary-color);
+    font-weight: 500;
+}
+
+/* ============================================================
+   ПРОГРЕСС
+   ============================================================ */
+.scan-progress {
+    display: none;
+    margin-top: 15px;
+}
+
+.progress {
+    height: 30px;
+    border-radius: 15px;
+    background: #f0f0f0;
+    overflow: hidden;
+}
+
+.progress .progress-bar {
+    background: linear-gradient(135deg, var(--secondary-color), var(--primary-color));
+    font-weight: 600;
+    font-size: 0.9rem;
+    line-height: 30px;
+}
+
+/* ============================================================
+   ПУСТОЕ СОСТОЯНИЕ
+   ============================================================ */
+.empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: #7f8c8d;
+}
+
+.empty-state i {
+    font-size: 4rem;
+    margin-bottom: 20px;
+    color: #bdc3c7;
+}
+
+.empty-state h5 {
+    color: var(--primary-color);
+    margin-bottom: 10px;
+}
+
+.empty-state p {
+    color: #95a5a6;
+}
+
+/* ============================================================
+   ТОСТ УВЕДОМЛЕНИЯ
+   ============================================================ */
+.toast-container {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    z-index: 9999;
+}
+
+.toast-custom {
+    background: white;
+    border-radius: var(--border-radius);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+    padding: 15px 20px;
+    min-width: 250px;
+    border-left: 4px solid var(--secondary-color);
+    animation: slideInRight 0.3s ease;
+    transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.toast-custom.success {
+    border-left-color: var(--success-color);
+}
+
+.toast-custom.error {
+    border-left-color: var(--danger-color);
+}
+
+.toast-custom.warning {
+    border-left-color: var(--warning-color);
+}
+
+@keyframes slideInRight {
+    from {
+        transform: translateX(100px);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+/* ============================================================
+   АНИМАЦИИ
+   ============================================================ */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.fade-in {
+    animation: fadeIn 0.5s ease forwards;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        transform: scale(1);
+    }
+    50% {
+        transform: scale(1.05);
+    }
+}
+
+.pulse {
+    animation: pulse 2s infinite;
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateX(-30px);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+.slide-in {
+    animation: slideIn 0.4s ease forwards;
+}
+
+/* ============================================================
+   АДАПТИВНОСТЬ ДЛЯ МОБИЛЬНЫХ
+   ============================================================ */
+@media (max-width: 768px) {
+    .navbar-custom .navbar-brand {
+        font-size: 1.2rem;
+    }
+    
+    .navbar-custom .navbar-text {
+        font-size: 0.8rem;
+    }
+    
+    .stat-item .value {
+        font-size: 1.2rem;
+    }
+    
+    .card-header {
+        font-size: 1rem;
+        padding: 0.8rem 1rem;
+    }
+    
+    .card-body {
+        padding: 1rem;
+    }
+    
+    .btn-primary {
+        padding: 8px 20px;
+        font-size: 0.9rem;
+    }
+    
+    #pathsList .list-group-item {
+        padding: 12px 15px;
+    }
+    
+    .table-responsive {
+        max-height: 300px;
+    }
+    
+    .charts-vertical-container {
+        gap: 15px;
+        margin: 10px 0;
+    }
+    
+    .chart-dynamic .chart-card .chart-wrapper {
+        min-height: 300px;
+    }
+    
+    .chart-histogram .chart-card .chart-wrapper {
+        min-height: 250px;
+    }
+    
+    .chart-histogram .chart-card .chart-wrapper .plotly-graph-div {
+        height: 300px !important;
+    }
+    
+    .navigation-bar {
+        gap: 10px;
+    }
+    
+    .btn-back, .btn-home {
+        padding: 4px 12px;
+        font-size: 0.8rem;
+    }
+    
+    .sidebar .folder-tree-header .path-text {
+        max-width: 120px;
+        font-size: 0.6rem;
+    }
+    
+    div.report-card > div.card-header.d-flex.justify-content-between.align-items-center strong {
+        font-size: 0.85rem !important;
+        padding: 2px 10px !important;
+    }
+}
+
+@media (max-width: 576px) {
+    .stat-item .value {
+        font-size: 1rem;
+    }
+    
+    .stat-item .label {
+        font-size: 0.65rem;
+    }
+    
+    .stat-item {
+        padding: 8px 10px;
+        min-width: 70px;
+    }
+    
+    .chart-dynamic .chart-card {
+        padding: 12px;
+    }
+    
+    .chart-histogram .chart-card {
+        padding: 12px;
+    }
+    
+    .chart-dynamic .chart-card .chart-wrapper {
+        min-height: 250px;
+    }
+    
+    .chart-histogram .chart-card .chart-wrapper {
+        min-height: 200px;
+    }
+    
+    .chart-histogram .chart-card .chart-wrapper .plotly-graph-div {
+        height: 250px !important;
+    }
+    
+    .loading {
+        padding: 30px 15px;
+        width: 90%;
+        min-width: auto;
+    }
+    
+    .loading .spinner-border {
+        width: 3rem;
+        height: 3rem;
+    }
+    
+    .toast-custom {
+        min-width: 200px;
+        padding: 12px 15px;
+    }
+    
+    .path-tag {
+        font-size: 0.8rem;
+        padding: 3px 10px;
+    }
+    
+    .sidebar .folder-tree-header .path-text {
+        max-width: 80px;
+        font-size: 0.55rem;
+    }
+    
+    div.report-card > div.card-header.d-flex.justify-content-between.align-items-center strong {
+        font-size: 0.75rem !important;
+        padding: 2px 8px !important;
+    }
+    
+    div.report-card > div.card-header.d-flex.justify-content-between.align-items-center .level-badge {
+        font-size: 0.6rem !important;
+        padding: 2px 10px !important;
+    }
+}
+
+/* ============================================================
+   СКРОЛЛБАР
+   ============================================================ */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: #f0f0f0;
+    border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--secondary-color);
+    border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--primary-color);
+}
+
+/* ============================================================
+   ДОПОЛНИТЕЛЬНЫЕ УТИЛИТЫ
+   ============================================================ */
+.text-muted-light {
+    color: #b0b0b0;
+}
+
+.text-truncate-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.history-limit-info {
+    font-size: 0.8rem;
+    color: #6c757d;
+    margin-top: 8px;
+    font-style: italic;
+}
+
+.history-date {
+    font-size: 0.8rem;
+    color: #7f8c8d;
+    white-space: nowrap;
+}
+
+.size-gb {
+    font-weight: 600;
+    color: var(--primary-color);
+}
+
+.size-bytes {
+    font-size: 0.75rem;
+    color: #95a5a6;
+}
+
+.export-buttons {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.export-buttons .btn {
+    border-radius: 20px;
+    font-size: 0.85rem;
+    padding: 5px 15px;
+}
+
+.search-box {
+    position: relative;
+}
+
+.search-box input {
+    padding-left: 40px;
+}
+
+.search-box i {
+    position: absolute;
+    left: 15px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #b0b0b0;
+}
