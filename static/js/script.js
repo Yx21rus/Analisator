@@ -229,7 +229,6 @@ function renderChart(chartData, divId, pathId) {
             
             var traces = data.data;
             
-            // Исправляем hovertemplate для всех трейсов
             traces.forEach(function(trace, index) {
                 if (trace.hovertemplate && trace.hovertemplate.indexOf('%{fullData.') !== -1) {
                     var folderName = trace.name || 'Папка ' + (index + 1);
@@ -270,362 +269,129 @@ function renderChart(chartData, divId, pathId) {
     `;
 }
 
-function scrollHistogram(scrollId, amount) {
-    var wrapper = document.getElementById('scrollWrapper_' + scrollId);
-    if (wrapper) {
-        wrapper.scrollLeft += amount;
-    }
-}
-
 // ============================================================
-// ГИСТОГРАММА - ИСПРАВЛЕННАЯ ВЕРСИЯ
+// ФУНКЦИЯ ДЛЯ СЕКЦИОНИРОВАННОЙ ГИСТОГРАММЫ
 // ============================================================
 
-function renderHistogram(historyData, divId, path, level, pathId) {
+function renderSectionedHistogram(chartData, divId, pathId) {
     var div = document.getElementById(divId);
     if (!div) {
-        console.error('❌ Div для гистограммы не найден:', divId);
+        console.error('❌ Div для секционированной гистограммы не найден:', divId);
         return;
     }
     
-    console.log('📊 renderHistogram для', pathId, 'уровень', level, 'данных:', historyData ? historyData.length : 0);
-    
-    if (!historyData || historyData.length === 0) {
+    if (!chartData) {
         div.innerHTML = `
             <div class="text-center text-muted py-3">
-                <i class="bi bi-inbox" style="font-size:2rem;display:block;margin-bottom:6px;"></i>
-                <p style="font-size:0.9rem;">Нет данных для гистограммы</p>
+                <i class="bi bi-bar-chart" style="font-size:2rem;display:block;margin-bottom:6px;"></i>
+                <p style="font-size:0.9rem;">Нет данных для секционированной гистограммы</p>
                 <small>Нужно минимум 2 сканирования</small>
             </div>
         `;
         return;
     }
     
-    // ================================================================
-    // 1. Получаем все уникальные даты
-    // ================================================================
-    var allDates = [];
-    historyData.forEach(function(item) {
-        if (allDates.indexOf(item.date) === -1) {
-            allDates.push(item.date);
-        }
-    });
-    allDates.sort();
-    
-    // ================================================================
-    // 2. Получаем все уникальные папки, сортируем по размеру
-    // ================================================================
-    var allFolderNames = [];
-    historyData.forEach(function(item) {
-        if (allFolderNames.indexOf(item.name) === -1) {
-            allFolderNames.push(item.name);
-        }
-    });
-    
-    var folderAvgSizes = allFolderNames.map(function(name) {
-        var total = 0, count = 0;
-        historyData.forEach(function(item) {
-            if (item.name === name) {
-                total += item.size_gb;
-                count++;
-            }
-        });
-        return { name: name, avg: count > 0 ? total / count : 0 };
-    });
-    folderAvgSizes.sort(function(a, b) { return b.avg - a.avg; });
-    var sortedFolderNames = folderAvgSizes.map(function(f) { return f.name; });
-    
-    // ================================================================
-    // 3. Цвета для каждой папки
-    // ================================================================
-    var folderColors = {
-        'colors': [
-            '#E74C3C', '#3498DB', '#2ECC71', '#F39C12', '#9B59B6', 
-            '#1ABC9C', '#E67E22', '#2980B9', '#27AE60', '#C0392B',
-            '#8E44AD', '#16A085', '#D35400', '#2C3E50', '#7F8C8D',
-            '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7',
-            '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9'
-        ]
-    };
-    
-    var folderColorMap = {};
-    sortedFolderNames.forEach(function(name, index) {
-        folderColorMap[name] = folderColors.colors[index % folderColors.colors.length];
-    });
-    
-    // ================================================================
-    // 4. Формируем данные для Plotly
-    // ================================================================
-    var traces = [];
-    var maxHeight = 0;
-    var barWidth = 0.6;
-    
-    var folderCount = sortedFolderNames.length;
-    if (folderCount > 10) {
-        barWidth = 0.5;
-    }
-    if (folderCount > 20) {
-        barWidth = 0.4;
-    }
-    if (folderCount > 30) {
-        barWidth = 0.3;
-    }
-    
-    sortedFolderNames.forEach(function(folderName) {
-        var values = [];
-        var dates = [];
-        var customData = [];
-        
-        allDates.forEach(function(date) {
-            var found = null;
-            historyData.forEach(function(item) {
-                if (item.date === date && item.name === folderName) {
-                    found = item;
-                }
-            });
-            
-            var dateObj = new Date(date);
-            var day = String(dateObj.getDate()).padStart(2, '0');
-            var month = String(dateObj.getMonth() + 1).padStart(2, '0');
-            var year = dateObj.getFullYear();
-            var hours = String(dateObj.getHours()).padStart(2, '0');
-            var minutes = String(dateObj.getMinutes()).padStart(2, '0');
-            var formattedDate = day + '.' + month + '.' + year + ' ' + hours + ':' + minutes;
-            
-            dates.push(formattedDate);
-            var val = found ? found.size_gb : 0;
-            values.push(val);
-            customData.push(folderName);
-            if (val > maxHeight) maxHeight = val;
-        });
-        
-        var displayName = folderName;
-        if (displayName.length > 15) {
-            displayName = displayName.substring(0, 12) + '...';
-        }
-        
-        traces.push({
-            x: dates,
-            y: values,
-            name: displayName,
-            type: 'bar',
-            customdata: customData,
-            marker: {
-                color: folderColorMap[folderName] || '#95A5A6',
-                line: {
-                    color: 'rgba(255,255,255,0.8)',
-                    width: 1
-                }
-            },
-            text: values.map(function(v) {
-                return v > 0 ? displayName + '\n' + v.toFixed(2) + ' ГБ' : '';
-            }),
-            textposition: 'outside',
-            textfont: {
-                size: Math.max(9, Math.min(12, 14 - folderCount * 0.15)),
-                color: '#2d3436',
-                weight: 'bold'
-            },
-            // ================================================================
-            // ИСПРАВЛЕННЫЙ hovertemplate - используем %{customdata}
-            // ================================================================
-            hovertemplate: '<b>%{customdata}</b><br>📅 %{x}<br>📊 Размер: %{y:.2f} ГБ<extra></extra>',
-            width: barWidth,
-            showlegend: true
-        });
-    });
-    
-    var pathName = path.split('\\').pop() || path;
-    var levelText = level === 1 ? 'Уровень 1' : 'Уровень 2';
-    
-    // ================================================================
-    // 5. РАСЧЕТ ШИРИНЫ
-    // ================================================================
-    var totalWidthPerDate = sortedFolderNames.length * barWidth;
-    var gapBetweenDates = totalWidthPerDate * 0.3;
-    
-    var minWidth = 900;
-    var calculatedWidth = allDates.length * (totalWidthPerDate + gapBetweenDates) + 120;
-    var plotWidth = Math.max(minWidth, calculatedWidth);
-    
-    var parentWidth = div.parentElement ? div.parentElement.clientWidth : 0;
-    if (parentWidth > 0 && parentWidth > plotWidth) {
-        plotWidth = parentWidth - 20;
-    }
-    
-    if (sortedFolderNames.length > 15 || allDates.length > 10) {
-        plotWidth = Math.max(plotWidth, 1400);
-    }
-    if (sortedFolderNames.length > 25 || allDates.length > 15) {
-        plotWidth = Math.max(plotWidth, 1800);
-    }
-    
-    console.log('📊 Ширина гистограммы:', plotWidth, 'px, папок:', sortedFolderNames.length, 'дат:', allDates.length);
-    
-    var scrollId = divId + '_' + pathId;
-    
-    var layout = {
-        title: {
-            text: '📊 Динамика размера папок по времени<br><span style="font-size:11px;font-weight:normal;">' + pathName + ' (' + levelText + ') | Папок: ' + sortedFolderNames.length + ' | Дат: ' + allDates.length + '</span>',
-            font: { size: 14, weight: 'bold' }
-        },
-        xaxis: {
-            title: 'Дата и время сканирования',
-            titlefont: { size: 12 },
-            tickangle: -45,
-            tickfont: { size: 10 },
-            gridcolor: '#f0f0f0',
-            type: 'category',
-            automargin: true
-        },
-        yaxis: {
-            title: 'Размер (ГБ)',
-            titlefont: { size: 12 },
-            gridcolor: '#e9ecef',
-            tickformat: '.2f',
-            zeroline: true,
-            zerolinecolor: '#dee2e6',
-            zerolinewidth: 1,
-            range: [0, maxHeight * 1.3 || 1]
-        },
-        barmode: 'group',
-        bargap: 0.3,
-        bargroupgap: 0.05,
-        height: 450,
-        width: plotWidth,
-        margin: { l: 60, r: 180, t: 60, b: 120 },
-        plot_bgcolor: '#f8f9fa',
-        paper_bgcolor: 'white',
-        responsive: false,
-        hovermode: 'closest',
-        legend: {
-            orientation: 'v',
-            x: 1.02,
-            y: 1,
-            xanchor: 'left',
-            yanchor: 'top',
-            bgcolor: 'rgba(255,255,255,0.95)',
-            bordercolor: '#ddd',
-            borderwidth: 1,
-            font: { size: Math.max(9, Math.min(11, 14 - folderCount * 0.1)), weight: 'bold' },
-            itemsizing: 'constant',
-            itemwidth: 80,
-            traceorder: 'normal',
-            itemclick: 'toggle',
-            itemdoubleclick: 'toggleothers'
-        }
-    };
-    
-    // ================================================================
-    // 6. Рендерим с оберткой для скролла
-    // ================================================================
-    div.innerHTML = '';
-    
-    var wrapper = document.createElement('div');
-    wrapper.className = 'histogram-scroll-wrapper';
-    wrapper.id = 'scrollWrapper_' + scrollId;
-    wrapper.style.cssText = `
-        width: 100%;
-        overflow-x: auto;
-        overflow-y: hidden;
-        position: relative;
-        background: white;
-        border-radius: 8px;
-        border: 1px solid #e9ecef;
-        padding: 5px 0;
-    `;
-    
-    var inner = document.createElement('div');
-    inner.className = 'histogram-inner';
-    inner.id = 'histogramInner_' + scrollId;
-    inner.style.cssText = `
-        min-width: 100%;
-        width: auto;
-        padding: 5px 0;
-        display: inline-block;
-    `;
-    
-    wrapper.appendChild(inner);
-    div.appendChild(wrapper);
-    
-    // ================================================================
-    // 7. Индикатор скролла
-    // ================================================================
-    var indicator = document.createElement('div');
-    indicator.className = 'scroll-indicator';
-    indicator.style.cssText = `
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 6px 12px;
-        font-size: 0.75rem;
-        color: #495057;
-        background: #f8f9fa;
-        border-radius: 0 0 8px 8px;
-        border-top: 1px solid #e9ecef;
-        flex-wrap: wrap;
-        gap: 6px;
-    `;
-    
-    var totalBars = sortedFolderNames.length * allDates.length;
-    var hasManyData = totalBars > 50;
-    
-    indicator.innerHTML = `
-        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-            <span class="scroll-arrow" onclick="scrollHistogram('${scrollId}', -400)" 
-                  style="cursor:pointer;padding:2px 10px;border-radius:4px;user-select:none;background:#e9ecef;font-size:1.1rem;">
-                <i class="bi bi-chevron-left"></i>
-            </span>
-            <span style="display:flex;align-items:center;gap:6px;">
-                <i class="bi bi-arrows-expand" style="color:#6c757d;"></i>
-                <span class="scroll-info">Прокрутите для просмотра</span>
-                ${hasManyData ? '<span class="badge bg-warning text-dark" style="font-size:0.6rem;">Много данных</span>' : ''}
-            </span>
-            <span class="scroll-arrow" onclick="scrollHistogram('${scrollId}', 400)" 
-                  style="cursor:pointer;padding:2px 10px;border-radius:4px;user-select:none;background:#e9ecef;font-size:1.1rem;">
-                <i class="bi bi-chevron-right"></i>
-            </span>
-        </div>
-        <div style="display:flex;align-items:center;gap:12px;font-size:0.7rem;flex-wrap:wrap;">
-            <span style="color:#6c757d;">
-                <i class="bi bi-folder"></i> ${sortedFolderNames.length} папок
-            </span>
-            <span style="color:#6c757d;">
-                <i class="bi bi-calendar"></i> ${allDates.length} дат
-            </span>
-            <span style="color:#6c757d;">
-                <i class="bi bi-grid"></i> ${totalBars} столбцов
-            </span>
-            <span style="color:#6c757d;margin-left:8px;font-style:italic;">
-                👆 Клик по легенде - скрыть/показать
-            </span>
-        </div>
-    `;
-    div.appendChild(indicator);
-    
-    // ================================================================
-    // 8. Рендерим график
-    // ================================================================
     try {
-        var plotDiv = document.getElementById('histogramInner_' + scrollId);
-        if (plotDiv) {
-            Plotly.purge(plotDiv);
-            Plotly.newPlot(plotDiv, traces, layout, {
-                responsive: false,
-                displaylogo: false,
-                modeBarButtonsToRemove: ['toImage', 'sendDataToCloud']
+        var data = typeof chartData === 'string' ? JSON.parse(chartData) : chartData;
+        
+        if (data && data.data && Array.isArray(data.data)) {
+            var plotId = div.id || divId;
+            Plotly.purge(plotId);
+            
+            var traces = data.data;
+            var layout = data.layout || {};
+            
+            // ============================================================
+            // ПРИНУДИТЕЛЬНО УСТАНАВЛИВАЕМ ПРАВИЛЬНЫЕ ПАРАМЕТРЫ
+            // ============================================================
+            
+            // Исправляем все трейсы
+            traces.forEach(function(trace, index) {
+                // Вертикальная ориентация
+                trace.orientation = 'v';
+                trace.type = 'bar';
+                
+                // Узкая ширина столбцов
+                if (!trace.width || trace.width > 0.5) {
+                    trace.width = 0.35;
+                }
+                
+                // Текст на столбцах
+                if (!trace.textposition) {
+                    trace.textposition = 'outside';
+                }
+                if (!trace.textfont) {
+                    trace.textfont = { size: 7, color: '#2d3436' };
+                }
+                
+                // Исправляем hovertemplate
+                if (trace.hovertemplate) {
+                    trace.hovertemplate = trace.hovertemplate.replace(/%\{fullData\.[^}]+\}/g, '%{customdata}');
+                }
+                
+                // Убедимся, что customdata есть
+                if (!trace.customdata && trace.name) {
+                    var dataLen = trace.x ? trace.x.length : 0;
+                    trace.customdata = Array(dataLen).fill(trace.name);
+                }
             });
+            
+            // ============================================================
+            // ПРИНУДИТЕЛЬНО УСТАНАВЛИВАЕМ ПРАВИЛЬНЫЙ LAYOUT
+            // ============================================================
+            
+            // Группировка - столбцы разных папок рядом
+            layout.barmode = 'group';
+            
+            // БОЛЬШОЙ промежуток между разными папками
+            layout.bargap = 0.6;
+            
+            // НЕТ промежутка между сканированиями одной папки
+            layout.bargroupgap = 0.0;
+            
+            // Размеры
+            layout.height = 460;
+            if (!layout.margin) {
+                layout.margin = { l: 50, r: 20, t: 60, b: 100 };
+            }
+            
+            // Легенда - горизонтальная сверху
+            if (!layout.legend) {
+                layout.legend = {};
+            }
+            layout.legend.orientation = 'h';
+            layout.legend.x = 0.5;
+            layout.legend.y = 1.02;
+            layout.legend.xanchor = 'center';
+            layout.legend.yanchor = 'bottom';
+            layout.legend.font = layout.legend.font || { size: 7 };
+            layout.legend.itemwidth = 30;
+            
+            // Фон
+            layout.plot_bgcolor = layout.plot_bgcolor || '#f8f9fa';
+            layout.paper_bgcolor = layout.paper_bgcolor || 'white';
+            
+            // Отключение зумирования для упрощения
+            layout.dragmode = false;
+            
+            // Отрисовка
+            Plotly.newPlot(plotId, traces, layout, { 
+                responsive: true,
+                displaylogo: false,
+                modeBarButtonsToRemove: ['toImage', 'sendDataToCloud', 'zoom2d', 'pan2d', 'select2d', 'lasso2d', 'zoomIn2d', 'zoomOut2d', 'autoScale2d', 'resetScale2d']
+            });
+            return;
         }
-    } catch(e) {
-        console.error('❌ Ошибка рендеринга гистограммы:', e);
-        div.innerHTML = `
-            <div class="text-center text-muted py-3">
-                <i class="bi bi-exclamation-triangle" style="font-size:2rem;display:block;margin-bottom:6px;color:#f39c12;"></i>
-                <p style="font-size:0.9rem;">Ошибка отображения гистограммы</p>
-                <small>${e.message}</small>
-            </div>
-        `;
+    } catch (e) {
+        console.log('📊 Ошибка парсинга секционированной гистограммы:', e);
     }
+    
+    div.innerHTML = `
+        <div class="text-center text-muted py-3">
+            <i class="bi bi-exclamation-triangle" style="font-size:2rem;display:block;margin-bottom:6px;color:#f39c12;"></i>
+            <p style="font-size:0.9rem;">Не удалось загрузить секционированную гистограмму</p>
+        </div>
+    `;
 }
 
 // ============================================================
@@ -644,7 +410,7 @@ function loadChartsFromDB(pathId, path) {
     getChartFromDB(path)
         .then(function(data) {
             console.log('📊 Получены данные из БД для:', path);
-            console.log('📊 histogram_data:', data.histogram_data ? data.histogram_data.length : 0);
+            console.log('📊 sectioned_histogram:', data.sectioned_histogram ? 'есть' : 'нет');
             
             if (data.scans_count > 0) {
                 store.scansCount = data.scans_count;
@@ -666,15 +432,15 @@ function loadChartsFromDB(pathId, path) {
                 }
             }
             
-            // ГИСТОГРАММА УРОВНЯ 1
-            if (data.histogram_data && data.histogram_data.length > 0) {
-                renderHistogram(data.histogram_data, 'level1HistogramDiv_' + pathId, path, 1, pathId);
+            // СЕКЦИОНИРОВАННАЯ ГИСТОГРАММА УРОВНЯ 1
+            if (data.sectioned_histogram) {
+                renderSectionedHistogram(data.sectioned_histogram, 'level1HistogramDiv_' + pathId, pathId);
             } else {
                 var histDiv = document.getElementById('level1HistogramDiv_' + pathId);
                 if (histDiv) {
                     histDiv.innerHTML = `
                         <div class="text-center text-muted py-3">
-                            <i class="bi bi-inbox" style="font-size:2rem;display:block;margin-bottom:6px;"></i>
+                            <i class="bi bi-bar-chart" style="font-size:2rem;display:block;margin-bottom:6px;"></i>
                             <p style="font-size:0.9rem;">Нет данных для гистограммы</p>
                             <small>Нужно минимум 2 сканирования</small>
                         </div>
@@ -692,7 +458,7 @@ function loadChartsFromDB(pathId, path) {
                     getChartFromDB(currentPath)
                         .then(function(data2) {
                             console.log('📊 Получены данные уровня 2 для:', currentPath);
-                            console.log('📊 histogram_data уровня 2:', data2.histogram_data ? data2.histogram_data.length : 0);
+                            console.log('📊 sectioned_histogram уровня 2:', data2.sectioned_histogram ? 'есть' : 'нет');
                             
                             if (data2.chart) {
                                 renderChart(data2.chart, 'level2ChartDiv_' + pathId, pathId);
@@ -709,14 +475,15 @@ function loadChartsFromDB(pathId, path) {
                                 }
                             }
                             
-                            if (data2.histogram_data && data2.histogram_data.length > 0) {
-                                renderHistogram(data2.histogram_data, 'level2HistogramDiv_' + pathId, currentPath, 2, pathId);
+                            // СЕКЦИОНИРОВАННАЯ ГИСТОГРАММА УРОВНЯ 2
+                            if (data2.sectioned_histogram) {
+                                renderSectionedHistogram(data2.sectioned_histogram, 'level2HistogramDiv_' + pathId, pathId);
                             } else {
                                 var histDiv2 = document.getElementById('level2HistogramDiv_' + pathId);
                                 if (histDiv2) {
                                     histDiv2.innerHTML = `
                                         <div class="text-center text-muted py-3">
-                                            <i class="bi bi-inbox" style="font-size:2rem;display:block;margin-bottom:6px;"></i>
+                                            <i class="bi bi-bar-chart" style="font-size:2rem;display:block;margin-bottom:6px;"></i>
                                             <p style="font-size:0.9rem;">Нет данных для гистограммы</p>
                                             <small>Нужно минимум 2 сканирования</small>
                                         </div>
@@ -730,16 +497,6 @@ function loadChartsFromDB(pathId, path) {
                         })
                         .catch(function(e) {
                             console.error('❌ Ошибка загрузки уровня 2:', e);
-                            var histDiv2 = document.getElementById('level2HistogramDiv_' + pathId);
-                            if (histDiv2) {
-                                histDiv2.innerHTML = `
-                                    <div class="text-center text-muted py-3">
-                                        <i class="bi bi-exclamation-triangle" style="font-size:2rem;display:block;margin-bottom:6px;color:#f39c12;"></i>
-                                        <p style="font-size:0.9rem;">Ошибка загрузки данных</p>
-                                        <small>${e.message}</small>
-                                    </div>
-                                `;
-                            }
                         });
                 }
             }
@@ -1138,8 +895,8 @@ function navigateMultiplePathDB(pathId, path) {
                 renderChart(data.chart, 'level2ChartDiv_' + pathId, pathId);
             }
             
-            if (data.histogram_data && data.histogram_data.length > 0) {
-                renderHistogram(data.histogram_data, 'level2HistogramDiv_' + pathId, data.path, 2, pathId);
+            if (data.sectioned_histogram) {
+                renderSectionedHistogram(data.sectioned_histogram, 'level2HistogramDiv_' + pathId, pathId);
             }
             
             renderFolderListLevel2(pathId, data.items || [], data.path);
@@ -1183,10 +940,6 @@ function navigateMultiplePathDB(pathId, path) {
         });
 }
 
-// ============================================================
-// ФУНКЦИЯ ПЕРЕХОДА В ПАПКУ УРОВНЯ 2
-// ============================================================
-
 function browseFolderMultipleDB(pathId, path) {
     var normalizedPath = normalizeUncPath(path);
     var store = multipleDataStore[pathId];
@@ -1211,29 +964,24 @@ function browseFolderMultipleDB(pathId, path) {
     
     document.getElementById('loading').style.display = 'block';
     
-    // Сначала получаем данные из БД через getChartFromDB
-    getChartFromDB(normalizedPath)
-        .then(function(dbData) {
-            console.log('📊 Получены данные из БД для уровня 2:', normalizedPath);
-            console.log('📊 histogram_data:', dbData.histogram_data ? dbData.histogram_data.length : 0);
+    browseFromDB(normalizedPath)
+        .then(function(data) {
+            document.getElementById('loading').style.display = 'none';
+            if (data.error) { showToast('Ошибка: ' + data.error, 'error'); return; }
             
-            // Обновляем store
-            store.currentPath = normalizedPath;
-            store.items = dbData.folders || [];
+            store.currentPath = data.path;
+            store.items = data.items || [];
             store.level = store.history.length;
             
             document.getElementById('levelBadge_' + pathId).textContent = 'Уровень 2';
-            document.getElementById('reportTitle_' + pathId).textContent = normalizedPath;
+            document.getElementById('reportTitle_' + pathId).textContent = data.path;
             
             document.getElementById('level2Section_' + pathId).classList.add('active');
             document.getElementById('level2Section_' + pathId).style.display = 'block';
-            document.getElementById('level2Path_' + pathId).textContent = normalizedPath;
+            document.getElementById('level2Path_' + pathId).textContent = data.path;
             
-            // ============================================================
-            // ГРАФИК УРОВНЯ 2
-            // ============================================================
-            if (dbData.chart) {
-                renderChart(dbData.chart, 'level2ChartDiv_' + pathId, pathId);
+            if (data.chart) {
+                renderChart(data.chart, 'level2ChartDiv_' + pathId, pathId);
             } else {
                 document.getElementById('level2ChartDiv_' + pathId).innerHTML = `
                     <div class="text-center text-muted py-3">
@@ -1244,28 +992,22 @@ function browseFolderMultipleDB(pathId, path) {
                 `;
             }
             
-            // ============================================================
-            // ГИСТОГРАММА УРОВНЯ 2
-            // ============================================================
-            if (dbData.histogram_data && dbData.histogram_data.length > 0) {
-                console.log('📊 Рендеринг гистограммы уровня 2:', dbData.histogram_data.length);
-                renderHistogram(dbData.histogram_data, 'level2HistogramDiv_' + pathId, normalizedPath, 2, pathId);
+            if (data.sectioned_histogram) {
+                renderSectionedHistogram(data.sectioned_histogram, 'level2HistogramDiv_' + pathId, pathId);
             } else {
                 document.getElementById('level2HistogramDiv_' + pathId).innerHTML = `
                     <div class="text-center text-muted py-3">
-                        <i class="bi bi-inbox" style="font-size:2rem;display:block;margin-bottom:6px;"></i>
+                        <i class="bi bi-bar-chart" style="font-size:2rem;display:block;margin-bottom:6px;"></i>
                         <p style="font-size:0.9rem;">Нет данных для гистограммы</p>
                         <small>Нужно минимум 2 сканирования</small>
                     </div>
                 `;
             }
             
-            // Рендерим список папок уровня 2
-            renderFolderListLevel2(pathId, dbData.folders || [], normalizedPath);
-            document.getElementById('level2ItemsCount_' + pathId).textContent = dbData.folders ? dbData.folders.length : 0;
+            renderFolderListLevel2(pathId, data.items || [], data.path);
+            document.getElementById('level2ItemsCount_' + pathId).textContent = data.items ? data.items.length : 0;
             
-            // Обновляем боковую панель
-            if (dbData.folders && dbData.folders.length > 0) {
+            if (data.items && data.items.length > 0) {
                 var container = document.getElementById('folderTreeContainer_' + pathId);
                 if (container) {
                     var html = '<ul class="folder-tree" style="list-style:none;padding:0;margin:0;">';
@@ -1277,7 +1019,7 @@ function browseFolderMultipleDB(pathId, path) {
                             </div>
                         </li>
                     `;
-                    dbData.folders.forEach(function(f) {
+                    data.items.forEach(function(f) {
                         var sizeStr = f.size_str || formatSize(f.size || 0);
                         html += `
                             <li style="padding:0;">
@@ -1311,21 +1053,11 @@ function browseFolderMultipleDB(pathId, path) {
             
             renderFolderListLevel1(pathId, store.baseFolders, store.rootPath, store.rootPath, store.rootPath);
             
-            document.getElementById('loading').style.display = 'none';
-            showToast('📁 ' + normalizedPath + ' - ' + (dbData.folders_count || 0) + ' элементов', 'info');
+            showToast('📁 ' + normalizedPath + ' - ' + (data.items_count || 0) + ' элементов', 'info');
         })
         .catch(function(e) {
             document.getElementById('loading').style.display = 'none';
-            console.error('❌ Ошибка загрузки уровня 2:', e);
             showToast('❌ Ошибка: ' + e.message, 'error');
-            
-            document.getElementById('level2HistogramDiv_' + pathId).innerHTML = `
-                <div class="text-center text-muted py-3">
-                    <i class="bi bi-exclamation-triangle" style="font-size:2rem;display:block;margin-bottom:6px;color:#f39c12;"></i>
-                    <p style="font-size:0.9rem;">Ошибка загрузки данных</p>
-                    <small>${e.message}</small>
-                </div>
-            `;
         });
 }
 
@@ -1366,7 +1098,7 @@ function showMultipleReports(results) {
         var level = data.level || 1;
         
         console.log('📊 showMultipleReports для pathId:', pathId);
-        console.log('📊 histogram_data:', data.histogram_data ? data.histogram_data.length : 0);
+        console.log('📊 sectioned_histogram:', data.sectioned_histogram ? 'есть' : 'нет');
         
         multipleDataStore[pathId] = {
             rootPath: data.path,
@@ -1378,7 +1110,7 @@ function showMultipleReports(results) {
             scansCount: data.scans_count || 0,
             totalSizeStr: data.total_size_str || '0',
             chart: data.chart,
-            histogramData: data.histogram_data || [],
+            sectionedHistogram: data.sectioned_histogram || null,
             folderHistory: data.folder_history || []
         };
         
@@ -1418,12 +1150,16 @@ function showMultipleReports(results) {
                             </div>
                         </div>
                         <div class="chart-card">
-                            <h6><i class="bi bi-bar-chart-fill"></i> Гистограмма</h6>
+                            <h6><i class="bi bi-layers"></i> Секционированная гистограмма</h6>
                             <div class="chart-wrapper">
                                 <div id="level1HistogramDiv_${pathId}">
-                                    <div class="text-center text-muted py-3"><i class="bi bi-clock-history" style="font-size:2rem;display:block;margin-bottom:6px;"></i><p style="font-size:0.9rem;">Загрузка...</p></div>
+                                    <div class="text-center text-muted py-3">
+                                        <i class="bi bi-bar-chart" style="font-size:2rem;display:block;margin-bottom:6px;"></i>
+                                        <p style="font-size:0.9rem;">Загрузка секционированной гистограммы...</p>
+                                    </div>
                                 </div>
                             </div>
+                            <small class="text-muted">Каждая секция показывает историю изменения размера одной папки</small>
                         </div>
                     </div>
 
@@ -1457,12 +1193,17 @@ function showMultipleReports(results) {
                                 </div>
                             </div>
                             <div class="chart-card">
-                                <h6><i class="bi bi-bar-chart-fill"></i> Гистограмма</h6>
+                                <h6><i class="bi bi-layers"></i> Секционированная гистограмма</h6>
                                 <div class="chart-wrapper">
                                     <div id="level2HistogramDiv_${pathId}">
-                                        <div class="text-center text-muted py-3"><i class="bi bi-clock-history" style="font-size:2rem;display:block;margin-bottom:6px;"></i><p style="font-size:0.9rem;">Нет данных</p></div>
+                                        <div class="text-center text-muted py-3">
+                                            <i class="bi bi-bar-chart" style="font-size:2rem;display:block;margin-bottom:6px;"></i>
+                                            <p style="font-size:0.9rem;">Нет данных</p>
+                                            <small>Откройте папку уровня 2</small>
+                                        </div>
                                     </div>
                                 </div>
+                                <small class="text-muted">Каждая секция показывает историю изменения размера одной папки</small>
                             </div>
                         </div>
 
@@ -1782,10 +1523,11 @@ updatePathTags();
 loadPaths();
 console.log('✅ Приложение загружено.');
 console.log('✅ Графики загружаются из БД при открытии отчета');
+console.log('✅ Секционированная гистограмма показывает каждую папку отдельно');
 console.log('✅ Каждая папка - свой цвет');
-console.log('✅ Легенда ВЕРТИКАЛЬНАЯ и находится СПРАВА от графика');
+console.log('✅ Легенда ГОРИЗОНТАЛЬНАЯ и находится ВВЕРХУ графика');
 console.log('✅ Клик по легенде - скрывает/показывает папку на графике');
-console.log('✅ Горизонтальный скролл для просмотра');
+console.log('✅ Столбцы НЕ НАЛЕЗАЮТ друг на друга (bargap=0.6)');
 console.log('📂 Боковая панель показывает все сканированные пути с разделителями');
 console.log('📊 Во всплывающих подсказках отображаются названия папок');
 console.log('💥 Пасхалка: нажми F2 для ЭПИЧНОГО взрыва "ЖАХ!"');

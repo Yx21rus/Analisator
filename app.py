@@ -16,6 +16,7 @@ import traceback
 import subprocess
 import re
 import plotly.graph_objects as go
+from decimal import Decimal
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your-secret-key-here'
@@ -620,7 +621,7 @@ def get_current_folders(disk_path, parent_path):
         ''', (disk_path, parent_path, disk_path, parent_path))
         data = cursor.fetchall()
         cursor.close()
-        return [{'name': row[0], 'size_gb': round(row[1], 4), 'size_bytes': row[2], 'level': row[3]} for row in data]
+        return [{'name': row[0], 'size_gb': round(float(row[1]), 4), 'size_bytes': row[2], 'level': row[3]} for row in data]
     except Exception as e:
         print(f"❌ Ошибка: {e}")
         return []
@@ -688,7 +689,7 @@ def get_folder_contents(disk_path, parent_path):
                     data = cursor.fetchall()
         
         cursor.close()
-        return [{'name': row[0], 'size_gb': round(row[1], 4), 'size_bytes': row[2], 'level': row[3]} for row in data]
+        return [{'name': row[0], 'size_gb': round(float(row[1]), 4), 'size_bytes': row[2], 'level': row[3]} for row in data]
     except Exception as e:
         print(f"❌ Ошибка: {e}")
         return []
@@ -696,7 +697,7 @@ def get_folder_contents(disk_path, parent_path):
         conn.close()
 
 # ========================================================================
-# ФУНКЦИЯ ПОСТРОЕНИЯ ГРАФИКОВ - ИСПРАВЛЕННАЯ
+# ФУНКЦИЯ ПОСТРОЕНИЯ ГРАФИКОВ
 # ========================================================================
 
 def create_chart_plotly(history_df, disk_path, parent_path, level=1):
@@ -712,7 +713,7 @@ def create_chart_plotly(history_df, disk_path, parent_path, level=1):
     try:
         latest_sizes = history_df[history_df['scan_date'] == history_df['scan_date'].max()]
         folder_sizes = latest_sizes.set_index('item_name')['size_gb'].to_dict()
-        sorted_folders = sorted(folders, key=lambda x: folder_sizes.get(x, 0), reverse=True)
+        sorted_folders = sorted(folders, key=lambda x: float(folder_sizes.get(x, 0)), reverse=True)
         
         if len(sorted_folders) > 20:
             top_folders = sorted_folders[:20]
@@ -745,13 +746,12 @@ def create_chart_plotly(history_df, disk_path, parent_path, level=1):
             folder_data = folder_data.sort_values('scan_date')
             
             dates = folder_data['scan_date'].tolist()
-            sizes = folder_data['size_gb'].tolist()
+            sizes = [float(s) for s in folder_data['size_gb'].tolist()]
             
             color = colors[idx % len(colors)]
             dash = 'dash' if folder_name == '📁 Остальные папки' else 'solid'
             line_width = 2 if folder_name == '📁 Остальные папки' else 3
             
-            # ИСПРАВЛЕНО: передаем имя папки в customdata
             fig.add_trace(go.Scatter(
                 x=dates,
                 y=sizes,
@@ -760,7 +760,6 @@ def create_chart_plotly(history_df, disk_path, parent_path, level=1):
                 line=dict(color=color, width=line_width, dash=dash),
                 marker=dict(size=8, color=color),
                 customdata=[folder_name] * len(dates),
-                # ИСПРАВЛЕНО: используем %{customdata}
                 hovertemplate=(
                     "<b>%{customdata}</b><br>" +
                     "📅 Дата: %{x|%d.%m.%Y %H:%M}<br>" +
@@ -774,7 +773,7 @@ def create_chart_plotly(history_df, disk_path, parent_path, level=1):
         
         fig.add_trace(go.Scatter(
             x=total_per_date['scan_date'],
-            y=total_per_date['size_gb'],
+            y=[float(s) for s in total_per_date['size_gb']],
             mode='lines+markers',
             name='📊 Общий размер',
             line=dict(color='#2C3E50', width=4),
@@ -855,6 +854,488 @@ def create_chart_plotly(history_df, disk_path, parent_path, level=1):
         traceback.print_exc()
         return None
 
+# ========================================================================
+# ФУНКЦИЯ СОЗДАНИЯ ГИСТОГРАММЫ - ОТДЕЛЬНЫЕ ПОДГИСТОГРАММЫ (SUBPLOTS)
+# ========================================================================
+
+def create_sectioned_histogram(history_data, path, level=1):
+    """
+    Создает ОТДЕЛЬНЫЕ подгистограммы для КАЖДОЙ папки с использованием subplots
+    Подгистограммы расположены ВЕРТИКАЛЬНО (одна под другой)
+    Столбцы ВЕРТИКАЛЬНЫЕ (растут вверх), ВПРИТЫК, разделены тонкими линиями
+    При одинаковом размере - общая подпись над группой столбцов
+    Даты ПОД КАЖДЫМ столбиком, ВЕРТИКАЛЬНЫЕ (снизу вверх)
+    """
+    if not history_data or len(history_data) == 0:
+        print("⚠️ create_sectioned_histogram: Нет данных для гистограммы")
+        return None
+    
+    print(f"📊 create_sectioned_histogram: Получено {len(history_data)} записей")
+    
+    try:
+        # ================================================================
+        # 1. Получаем все уникальные даты сканирований
+        # ================================================================
+        all_dates = []
+        for item in history_data:
+            date = item.get('date', '')
+            if date and date not in all_dates:
+                all_dates.append(date)
+        all_dates.sort()
+        
+        print(f"📊 Найдено дат: {len(all_dates)}")
+        
+        if len(all_dates) == 0:
+            print("⚠️ Нет дат в данных")
+            return None
+        
+        # ================================================================
+        # 2. Получаем все уникальные папки
+        # ================================================================
+        all_folder_names = []
+        for item in history_data:
+            name = item.get('name', '')
+            if name and name not in all_folder_names:
+                all_folder_names.append(name)
+        
+        print(f"📊 Найдено папок: {len(all_folder_names)}")
+        
+        if len(all_folder_names) == 0:
+            print("⚠️ Нет папок в данных")
+            return None
+        
+        # Сортируем папки по среднему размеру
+        folder_avg_sizes = []
+        for name in all_folder_names:
+            total = 0
+            count = 0
+            for item in history_data:
+                if item.get('name') == name:
+                    size = float(item.get('size_gb', 0))
+                    total += size
+                    count += 1
+            avg = total / count if count > 0 else 0
+            folder_avg_sizes.append({'name': name, 'avg': avg})
+        
+        folder_avg_sizes.sort(key=lambda x: x['avg'], reverse=True)
+        sorted_folder_names = [f['name'] for f in folder_avg_sizes]
+        
+        # ================================================================
+        # 3. Ограничиваем количество папок
+        # ================================================================
+        MAX_FOLDERS = 15
+        truncated = len(sorted_folder_names) > MAX_FOLDERS
+        
+        if truncated:
+            display_folders = sorted_folder_names[:MAX_FOLDERS]
+            other_folders = sorted_folder_names[MAX_FOLDERS:]
+        else:
+            display_folders = sorted_folder_names
+            other_folders = []
+        
+        print(f"📊 Отображаем папок: {len(display_folders)}")
+        
+        # ================================================================
+        # 4. Палитра цветов
+        # ================================================================
+        folder_colors = [
+            '#E67E22',  # Оранжевый
+            '#2980B9',  # Синий
+            '#27AE60',  # Зеленый
+            '#F1C40F',  # Желтый
+            '#8E44AD',  # Фиолетовый
+            '#E74C3C',  # Красный
+            '#1ABC9C',  # Бирюзовый
+            '#2C3E50',  # Темно-синий
+            '#F39C12',  # Оранжево-желтый
+            '#3498DB',  # Голубой
+            '#2ECC71',  # Светло-зеленый
+            '#9B59B6',  # Темно-фиолетовый
+            '#E67E22',  # Оранжевый
+            '#2980B9',  # Синий
+            '#27AE60'   # Зеленый
+        ]
+        
+        # ================================================================
+        # 5. СОЗДАЕМ SUBPLOTS
+        # ================================================================
+        
+        fig = go.Figure()
+        
+        max_height = 0
+        folder_count = len(display_folders)
+        
+        # Для каждой папки создаем отдельный трейс
+        for idx, folder_name in enumerate(display_folders):
+            x_values = []
+            y_values = []
+            custom_data = []
+            text_labels = []
+            
+            color = folder_colors[idx % len(folder_colors)]
+            
+            # Сначала собираем все значения для этой папки
+            values_by_date = []
+            for date in all_dates:
+                found = None
+                for item in history_data:
+                    if item.get('date') == date and item.get('name') == folder_name:
+                        found = item
+                        break
+                
+                val = float(found.get('size_gb', 0)) if found else 0
+                values_by_date.append({
+                    'date': date,
+                    'value': val,
+                    'found': found
+                })
+                if val > max_height:
+                    max_height = val
+            
+            # Формируем данные для отображения с группировкой одинаковых значений
+            i = 0
+            while i < len(values_by_date):
+                current_val = values_by_date[i]['value']
+                j = i
+                # Находим все последовательные одинаковые значения
+                while j < len(values_by_date) and abs(values_by_date[j]['value'] - current_val) < 0.001:
+                    j += 1
+                
+                # Количество одинаковых столбцов
+                count_same = j - i
+                
+                # Добавляем столбцы с одинаковыми значениями
+                for k in range(i, j):
+                    date_data = values_by_date[k]
+                    date = date_data['date']
+                    val = date_data['value']
+                    
+                    # Форматируем дату
+                    date_parts = date.split(' ')
+                    if len(date_parts) >= 2:
+                        date_parts2 = date_parts[0].split('-')
+                        if len(date_parts2) >= 3:
+                            display_date = f"{date_parts2[2]}.{date_parts2[1]}"
+                            time_part = date_parts[1][:5] if len(date_parts[1]) >= 5 else date_parts[1]
+                            display_date = f"{display_date}\n{time_part}"
+                        else:
+                            display_date = date_parts[0]
+                    else:
+                        display_date = date
+                    
+                    x_values.append(display_date)
+                    y_values.append(val)
+                    custom_data.append(f'{folder_name}\n{date}')
+                    
+                    # Текст над столбцом - только если это первый столбец в группе одинаковых
+                    if k == i and count_same > 1:
+                        text_labels.append(f'{val:.2f}')  # Один раз для группы
+                    elif k == i:
+                        text_labels.append(f'{val:.2f}')
+                    else:
+                        text_labels.append('')  # Пусто для остальных одинаковых
+                
+                i = j
+            
+            display_name = folder_name
+            if len(display_name) > 20:
+                display_name = display_name[:17] + '...'
+            
+            axis_num = idx + 1
+            
+            fig.add_trace(go.Bar(
+                x=x_values,
+                y=y_values,
+                name=display_name,
+                legendgroup=folder_name,
+                text=text_labels,
+                textposition='outside',
+                textfont={
+                    'size': 8,
+                    'color': '#2c3e50',
+                    'weight': 'bold'
+                },
+                marker={
+                    'color': color,
+                    'line': {
+                        'color': 'rgba(0,0,0,0.15)',  # Тонкая разделительная линия
+                        'width': 0.5
+                    }
+                },
+                customdata=custom_data,
+                hovertemplate=(
+                    '<b>%{customdata}</b><br>' +
+                    '📊 Размер: %{y:.2f} ГБ<br>' +
+                    '<extra></extra>'
+                ),
+                width=0.95,  # Почти вплотную
+                showlegend=False,
+                orientation='v',
+                yaxis=f'y{axis_num}',
+                xaxis=f'x{axis_num}'
+            ))
+        
+        print(f"📊 Создано {len(display_folders)} подгистограмм")
+        
+        # ================================================================
+        # 6. Добавляем "Остальные" папки если есть
+        # ================================================================
+        if truncated and other_folders:
+            x_values = []
+            y_values = []
+            custom_data = []
+            text_labels = []
+            
+            values_by_date = []
+            for date in all_dates:
+                total = 0
+                for item in history_data:
+                    if item.get('date') == date and item.get('name') in other_folders:
+                        total += float(item.get('size_gb', 0))
+                values_by_date.append({
+                    'date': date,
+                    'value': total
+                })
+                if total > max_height:
+                    max_height = total
+            
+            # Группировка одинаковых значений
+            i = 0
+            while i < len(values_by_date):
+                current_val = values_by_date[i]['value']
+                j = i
+                while j < len(values_by_date) and abs(values_by_date[j]['value'] - current_val) < 0.001:
+                    j += 1
+                
+                count_same = j - i
+                
+                for k in range(i, j):
+                    date_data = values_by_date[k]
+                    date = date_data['date']
+                    val = date_data['value']
+                    
+                    date_parts = date.split(' ')
+                    if len(date_parts) >= 2:
+                        date_parts2 = date_parts[0].split('-')
+                        if len(date_parts2) >= 3:
+                            display_date = f"{date_parts2[2]}.{date_parts2[1]}\n{date_parts[1][:5]}"
+                        else:
+                            display_date = date_parts[0]
+                    else:
+                        display_date = date
+                    
+                    x_values.append(display_date)
+                    y_values.append(val)
+                    custom_data.append(f'Остальные папки\n{date}')
+                    
+                    if k == i and count_same > 1:
+                        text_labels.append(f'{val:.2f}')
+                    elif k == i:
+                        text_labels.append(f'{val:.2f}')
+                    else:
+                        text_labels.append('')
+                
+                i = j
+            
+            axis_num = folder_count + 1
+            
+            fig.add_trace(go.Bar(
+                x=x_values,
+                y=y_values,
+                name=f'📦 Остальные ({len(other_folders)})',
+                legendgroup='Остальные',
+                text=text_labels,
+                textposition='outside',
+                textfont={
+                    'size': 8,
+                    'color': '#7f8c8d',
+                    'weight': 'normal'
+                },
+                marker={
+                    'color': '#95A5A6',
+                    'opacity': 0.7,
+                    'line': {
+                        'color': 'rgba(0,0,0,0.1)',
+                        'width': 0.5
+                    }
+                },
+                customdata=custom_data,
+                hovertemplate=(
+                    '<b>📦 Остальные папки</b><br>' +
+                    '📅 %{customdata}<br>' +
+                    '📊 Размер: %{y:.2f} ГБ<br>' +
+                    '<extra></extra>'
+                ),
+                width=0.95,
+                showlegend=False,
+                orientation='v',
+                yaxis=f'y{axis_num}',
+                xaxis=f'x{axis_num}'
+            ))
+            
+            print(f"📊 Добавлена подгистограмма 'Остальные'")
+            folder_count += 1
+        
+        # ================================================================
+        # 7. НАСТРОЙКА SUBPLOTS
+        # ================================================================
+        path_name = path.split('\\')[-1] if path else 'Папка'
+        level_text = f'Уровень {level}'
+        
+        y_max = max_height * 1.25 if max_height > 0 else 1.5
+        
+        date_count = len(all_dates)
+        min_width = 600
+        calculated_width = max(min_width, date_count * 70 + 200)
+        plot_width = min(1200, max(800, calculated_width))
+        
+        layout_dict = {
+            'title': {
+                'text': (
+                    f'📊 Динамика размера папок<br>' +
+                    f'<span style="font-size:13px;font-weight:normal;color:#555;">'
+                    f'{path_name} ({level_text}) | Папок: {len(display_folders)}'
+                    f'{f" (показаны топ-{MAX_FOLDERS})" if truncated else ""}'
+                    f' | Сканирований: {len(all_dates)}'
+                    f'</span>'
+                ),
+                'font': {'size': 18, 'weight': 'bold', 'color': '#2c3e50'},
+                'x': 0.5
+            },
+            'height': 100 + folder_count * 210,
+            'width': plot_width,
+            'margin': {'l': 80, 'r': 30, 't': 80, 'b': 40},
+            'plot_bgcolor': '#ffffff',
+            'paper_bgcolor': '#ffffff',
+            'hovermode': 'closest',
+            'showlegend': True,
+            'legend': {
+                'orientation': 'v',
+                'x': 1.02,
+                'y': 1,
+                'xanchor': 'left',
+                'yanchor': 'top',
+                'bgcolor': 'rgba(255,255,255,0.95)',
+                'bordercolor': '#e0e0e0',
+                'borderwidth': 1,
+                'font': {'size': 9, 'color': '#2c3e50'},
+                'itemsizing': 'constant',
+                'itemwidth': 30,
+                'traceorder': 'normal',
+                'itemclick': 'toggle',
+                'itemdoubleclick': 'toggleothers'
+            },
+            'barmode': 'group',
+            'bargap': 0.25,
+            'bargroupgap': 0.0
+        }
+        
+        # Добавляем оси Y и X для каждой подгистограммы
+        for i in range(folder_count):
+            axis_num = i + 1
+            yaxis_key = f'yaxis{axis_num}'
+            xaxis_key = f'xaxis{axis_num}'
+            
+            domain_start = (folder_count - i - 1) / folder_count
+            domain_end = (folder_count - i) / folder_count
+            
+            show_title = (i == folder_count - 1)
+            
+            layout_dict[yaxis_key] = {
+                'title': {
+                    'text': 'Размер (ГБ)' if show_title else '',
+                    'font': {'size': 9, 'color': '#2c3e50'}
+                },
+                'domain': [domain_start + 0.05, domain_end - 0.02],
+                'range': [0, y_max],
+                'gridcolor': '#ecf0f1',
+                'gridwidth': 0.5,
+                'tickformat': '.2f',
+                'tickfont': {'size': 7, 'color': '#2c3e50'},
+                'zeroline': True,
+                'zerolinecolor': '#bdc3c7',
+                'zerolinewidth': 1,
+                'showgrid': True,
+                'showline': True,
+                'linecolor': '#dfe6e9',
+                'linewidth': 0.5,
+                'anchor': f'x{axis_num}',
+                'matches': None
+            }
+            
+            layout_dict[xaxis_key] = {
+                'title': {
+                    'text': 'Даты сканирования' if show_title else '',
+                    'font': {'size': 8, 'color': '#2c3e50'}
+                },
+                'domain': [0.12, 0.92],
+                'tickangle': -90,
+                'tickfont': {'size': 7, 'family': 'Arial, sans-serif', 'color': '#2c3e50'},
+                'gridcolor': '#ecf0f1',
+                'gridwidth': 0.5,
+                'automargin': True,
+                'type': 'category',
+                'showticklabels': True,
+                'tickmode': 'array',
+                'anchor': f'y{axis_num}',
+                'matches': None,
+                'side': 'bottom',
+                'showline': True,
+                'linecolor': '#dfe6e9',
+                'linewidth': 0.5
+            }
+        
+        # Добавляем аннотации
+        annotations = []
+        for i, folder_name in enumerate(display_folders):
+            display_name = folder_name
+            if len(display_name) > 20:
+                display_name = display_name[:17] + '...'
+            
+            y_pos = (folder_count - i - 0.5) / folder_count
+            
+            annotations.append({
+                'x': 0.02,
+                'y': y_pos,
+                'xref': 'paper',
+                'yref': 'paper',
+                'text': f'<b>{display_name}</b>',
+                'showarrow': False,
+                'font': {'size': 9, 'color': '#2c3e50'},
+                'align': 'left',
+                'bgcolor': 'rgba(255,255,255,0.8)',
+                'borderpad': 2
+            })
+        
+        if truncated and other_folders:
+            annotations.append({
+                'x': 0.02,
+                'y': 0.5 / folder_count,
+                'xref': 'paper',
+                'yref': 'paper',
+                'text': f'<b>📦 Остальные ({len(other_folders)})</b>',
+                'showarrow': False,
+                'font': {'size': 9, 'color': '#7f8c8d'},
+                'align': 'left',
+                'bgcolor': 'rgba(255,255,255,0.8)',
+                'borderpad': 2
+            })
+        
+        layout_dict['annotations'] = annotations
+        
+        fig.update_layout(**layout_dict)
+        
+        chart_json = fig.to_json()
+        
+        print(f"✅ Создана гистограмма: {len(display_folders)} подгистограмм, {len(all_dates)} сканирований")
+        print(f"   📊 Ширина: {plot_width}px для горизонтального скролла")
+        print(f"   📊 Столбцы разделены тонкими линиями, при одинаковых значениях - общая подпись")
+        return chart_json
+        
+    except Exception as e:
+        print(f"❌ Ошибка создания гистограммы: {e}")
+        traceback.print_exc()
+        return None
 # ========================================================================
 # РОУТЫ FLASK
 # ========================================================================
@@ -953,9 +1434,15 @@ def scan():
                 histogram_data.append({
                     'date': current_date,
                     'name': folder['name'],
-                    'size_gb': folder['size_gb']
+                    'size_gb': float(folder['size_gb'])
                 })
             print(f"📊 Создано {len(histogram_data)} записей для гистограммы из текущих папок для {path}")
+        
+        sectioned_histogram = None
+        if histogram_data and len(histogram_data) > 0:
+            sectioned_histogram = create_sectioned_histogram(histogram_data, path, save_level)
+        else:
+            print(f"⚠️ Нет данных для гистограммы для {path}")
         
         parent_path = None
         parent_chart = None
@@ -983,6 +1470,7 @@ def scan():
             'scans_count': scans_count,
             'folder_history': folder_history,
             'histogram_data': histogram_data,
+            'sectioned_histogram': sectioned_histogram,
             'level': save_level,
             'parent_path': parent_path,
             'parent_chart': parent_chart,
@@ -1150,6 +1638,12 @@ def browse_from_db():
         else:
             print(f"📊 Папка {path} пуста или не сканировалась")
         
+        sectioned_histogram = None
+        if histogram_data and len(histogram_data) > 0:
+            sectioned_histogram = create_sectioned_histogram(histogram_data, path, current_level)
+        else:
+            print(f"⚠️ Нет данных для гистограммы для {path}")
+        
         parent_path = None
         parent_chart = None
         parent_folder_history = []
@@ -1174,6 +1668,7 @@ def browse_from_db():
             'scans_count': scans_count,
             'chart': chart_json,
             'histogram_data': histogram_data,
+            'sectioned_histogram': sectioned_histogram,
             'folder_history': folder_history,
             'level': current_level,
             'parent_path': parent_path,
@@ -1247,6 +1742,12 @@ def get_parent_data():
                     'size_gb': float(row['size_gb'])
                 })
         
+        sectioned_histogram = None
+        if histogram_data and len(histogram_data) > 0:
+            sectioned_histogram = create_sectioned_histogram(histogram_data, path, current_level)
+        else:
+            print(f"⚠️ Нет данных для гистограммы для {path}")
+        
         conn.close()
         
         return jsonify({
@@ -1256,9 +1757,10 @@ def get_parent_data():
             'folder_history': folder_history,
             'folders': current_folders,
             'histogram_data': histogram_data,
+            'sectioned_histogram': sectioned_histogram,
             'folders_count': len(current_folders),
-            'total_size': sum(f['size_bytes'] for f in current_folders) if current_folders else 0,
-            'total_size_str': format_size_auto(sum(f['size_bytes'] for f in current_folders) if current_folders else 0),
+            'total_size': sum(float(f['size_bytes']) for f in current_folders) if current_folders else 0,
+            'total_size_str': format_size_auto(sum(float(f['size_bytes']) for f in current_folders) if current_folders else 0),
             'scans_count': history_df['scan_date'].nunique() if not history_df.empty else 0
         })
         
@@ -1310,6 +1812,7 @@ def report():
                 'total_size_str': '0',
                 'folder_history': folder_history,
                 'histogram_data': [],
+                'sectioned_histogram': None,
                 'level': 1,
                 'parent_path': None,
                 'parent_chart': None,
@@ -1347,6 +1850,7 @@ def report():
                 'total_size_str': '0',
                 'folder_history': folder_history,
                 'histogram_data': [],
+                'sectioned_histogram': None,
                 'level': current_level,
                 'parent_path': None,
                 'parent_chart': None,
@@ -1371,6 +1875,12 @@ def report():
                 })
             print(f"📊 Подготовлено {len(histogram_data)} записей для гистограммы из истории для {path}")
         
+        sectioned_histogram = None
+        if histogram_data and len(histogram_data) > 0:
+            sectioned_histogram = create_sectioned_histogram(histogram_data, path, current_level)
+        else:
+            print(f"⚠️ Нет данных для гистограммы для {path}")
+        
         parent_path = None
         parent_chart = None
         parent_folder_history = []
@@ -1392,12 +1902,12 @@ def report():
             history_data.append({
                 'date': row['scan_date'].strftime('%Y-%m-%d %H:%M'),
                 'name': row['item_name'],
-                'size_gb': round(row['size_gb'], 4),
+                'size_gb': round(float(row['size_gb']), 4),
                 'level': int(row['level']) if 'level' in row else 1
             })
         
         total_folders = len(current_folders)
-        total_size = sum(f['size_bytes'] for f in current_folders) if current_folders else 0
+        total_size = sum(float(f['size_bytes']) for f in current_folders) if current_folders else 0
         
         conn.close()
         
@@ -1413,6 +1923,7 @@ def report():
             'total_size_str': format_size_auto(total_size),
             'folder_history': folder_history,
             'histogram_data': histogram_data,
+            'sectioned_histogram': sectioned_histogram,
             'level': current_level,
             'parent_path': parent_path,
             'parent_chart': parent_chart,
@@ -1434,10 +1945,15 @@ if __name__ == '__main__':
     print("=" * 60)
     print("🌐 Откройте: http://localhost:5000")
     print("📂 Поддерживается сканирование любого количества путей")
-    print("📊 Для каждого пути свои 4 графика (2 уровня 1 + 2 уровня 2)")
+    print("📊 Для каждого пути свои графики")
     print("📊 Навигация работает независимо для каждого пути")
     print("📊 Данные для гистограмм берутся из истории сканирований")
     print("📊 Папки второго уровня сканируются и сохраняются автоматически")
     print("📊 Во всплывающих подсказках отображаются названия папок")
+    print("📊 Добавлена гистограмма с ОТДЕЛЬНЫМИ подгистограммами (SUBPLOTS) для каждой папки")
+    print("📊 Подписи дат ПОД каждым столбиком, ВЕРТИКАЛЬНЫЕ (снизу вверх)")
+    print("📊 Столбцы ВЕРТИКАЛЬНЫЕ (растут вверх), ВПРИТЫК")
+    print("📊 ГОРИЗОНТАЛЬНЫЙ СКРОЛЛ для большого количества сканирований")
+    print("📊 ВЕРТИКАЛЬНЫЙ СКРОЛЛ для большого количества папок")
     print("=" * 60 + "\n")
     app.run(debug=True, host='0.0.0.0', port=5000)
