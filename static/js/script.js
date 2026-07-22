@@ -202,6 +202,72 @@ function getChartFromDB(path) {
 }
 
 // ============================================================
+// ЭКСПОРТ В EXCEL - ГЛОБАЛЬНАЯ ФУНКЦИЯ
+// ============================================================
+
+window.exportExcel = function(pathId) {
+    console.log('📊 exportExcel вызвана для pathId:', pathId);
+    
+    var store = multipleDataStore[pathId];
+    console.log('📊 store:', store);
+    
+    if (!store) {
+        showToast('❌ Нет данных для экспорта', 'error');
+        return;
+    }
+    
+    var path = store.currentPath || store.rootPath;
+    console.log('📊 path:', path);
+    
+    if (!path) {
+        showToast('❌ Путь не найден', 'error');
+        return;
+    }
+    
+    showToast('📊 Генерация Excel отчета...', 'info');
+    document.getElementById('loading').style.display = 'block';
+    
+    fetch('/api/export_excel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: path })
+    })
+    .then(function(response) {
+        document.getElementById('loading').style.display = 'none';
+        console.log('📊 Ответ получен, статус:', response.status);
+        
+        if (!response.ok) {
+            return response.json().then(function(err) {
+                throw new Error(err.error || 'Ошибка сервера');
+            });
+        }
+        
+        return response.blob().then(function(blob) {
+            console.log('📊 Получен blob, размер:', blob.size);
+            var url = URL.createObjectURL(blob);
+            var a = document.createElement('a');
+            a.href = url;
+            a.download = 'report.xlsx';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            setTimeout(function() {
+                URL.revokeObjectURL(url);
+            }, 100);
+            
+            showToast('✅ Excel отчет скачан', 'success');
+        });
+    })
+    .catch(function(e) {
+        document.getElementById('loading').style.display = 'none';
+        console.error('❌ Ошибка экспорта:', e);
+        showToast('❌ Ошибка экспорта: ' + e.message, 'error');
+    });
+};
+
+console.log('✅ window.exportExcel доступна:', typeof window.exportExcel === 'function');
+
+// ============================================================
 // РЕНДЕРИНГ ГРАФИКОВ
 // ============================================================
 
@@ -301,22 +367,15 @@ function renderSectionedHistogram(chartData, divId, pathId) {
             var traces = data.data;
             var layout = data.layout || {};
             
-            // ============================================================
-            // ПРИНУДИТЕЛЬНО УСТАНАВЛИВАЕМ ПРАВИЛЬНЫЕ ПАРАМЕТРЫ
-            // ============================================================
-            
             // Исправляем все трейсы
             traces.forEach(function(trace, index) {
-                // Вертикальная ориентация
                 trace.orientation = 'v';
                 trace.type = 'bar';
                 
-                // Узкая ширина столбцов
                 if (!trace.width || trace.width > 0.5) {
                     trace.width = 0.35;
                 }
                 
-                // Текст на столбцах
                 if (!trace.textposition) {
                     trace.textposition = 'outside';
                 }
@@ -324,38 +383,25 @@ function renderSectionedHistogram(chartData, divId, pathId) {
                     trace.textfont = { size: 7, color: '#2d3436' };
                 }
                 
-                // Исправляем hovertemplate
                 if (trace.hovertemplate) {
                     trace.hovertemplate = trace.hovertemplate.replace(/%\{fullData\.[^}]+\}/g, '%{customdata}');
                 }
                 
-                // Убедимся, что customdata есть
                 if (!trace.customdata && trace.name) {
                     var dataLen = trace.x ? trace.x.length : 0;
                     trace.customdata = Array(dataLen).fill(trace.name);
                 }
             });
             
-            // ============================================================
-            // ПРИНУДИТЕЛЬНО УСТАНАВЛИВАЕМ ПРАВИЛЬНЫЙ LAYOUT
-            // ============================================================
-            
-            // Группировка - столбцы разных папок рядом
             layout.barmode = 'group';
-            
-            // БОЛЬШОЙ промежуток между разными папками
             layout.bargap = 0.6;
-            
-            // НЕТ промежутка между сканированиями одной папки
             layout.bargroupgap = 0.0;
             
-            // Размеры
             layout.height = 460;
             if (!layout.margin) {
                 layout.margin = { l: 50, r: 20, t: 60, b: 100 };
             }
             
-            // Легенда - горизонтальная сверху
             if (!layout.legend) {
                 layout.legend = {};
             }
@@ -367,14 +413,10 @@ function renderSectionedHistogram(chartData, divId, pathId) {
             layout.legend.font = layout.legend.font || { size: 7 };
             layout.legend.itemwidth = 30;
             
-            // Фон
             layout.plot_bgcolor = layout.plot_bgcolor || '#f8f9fa';
             layout.paper_bgcolor = layout.paper_bgcolor || 'white';
-            
-            // Отключение зумирования для упрощения
             layout.dragmode = false;
             
-            // Отрисовка
             Plotly.newPlot(plotId, traces, layout, { 
                 responsive: true,
                 displaylogo: false,
@@ -475,7 +517,6 @@ function loadChartsFromDB(pathId, path) {
                                 }
                             }
                             
-                            // СЕКЦИОНИРОВАННАЯ ГИСТОГРАММА УРОВНЯ 2
                             if (data2.sectioned_histogram) {
                                 renderSectionedHistogram(data2.sectioned_histogram, 'level2HistogramDiv_' + pathId, pathId);
                             } else {
@@ -680,6 +721,11 @@ function buildNavigationHTML(pathId, currentPathName, rootPath) {
     if (html) html += '<span class="nav-separator">|</span>';
     html += '<button class="btn btn-sm btn-outline-primary" onclick="loadChartsFromDB(\'' + pathId + '\', \'' + encodeURIComponent(currentPathName) + '\')" style="font-size:0.75rem;padding:2px 8px;">';
     html += '<i class="bi bi-arrow-repeat"></i> Обновить графики</button>';
+    
+    // КНОПКА ЭКСПОРТА EXCEL
+    html += '<span class="nav-separator">|</span>';
+    html += '<button class="btn btn-sm btn-success" onclick="window.exportExcel(\'' + pathId + '\')" style="font-size:0.75rem;padding:2px 10px;">';
+    html += '<i class="bi bi-file-earmark-excel"></i> Excel</button>';
     
     if (parts.length > 1) {
         if (html) html += '<span class="nav-separator">|</span>';
@@ -1120,6 +1166,9 @@ function showMultipleReports(results) {
                     <span><i class="bi bi-folder"></i> <strong id="reportTitle_${pathId}">${data.path}</strong></span>
                     <div>
                         <span class="badge bg-secondary level-badge" id="levelBadge_${pathId}">Уровень ${level}</span>
+                        <button class="btn btn-sm btn-success ms-2" onclick="window.exportExcel('${pathId}')" style="font-size:0.7rem;padding:2px 10px;">
+                            <i class="bi bi-file-earmark-excel"></i> Excel
+                        </button>
                         <button class="btn btn-sm btn-danger ms-2" onclick="closeReport()"><i class="bi bi-x-lg"></i></button>
                     </div>
                 </div>
@@ -1137,6 +1186,9 @@ function showMultipleReports(results) {
                             📌 УРОВЕНЬ 1 - СКАНИРУЕМЫЙ КАТАЛОГ
                             <span class="badge">Уровень 1</span>
                             <span class="path-text">${data.path}</span>
+                            <button class="btn btn-sm btn-success ms-auto" onclick="window.exportExcel('${pathId}')" style="font-size:0.7rem;padding:2px 10px;">
+                                <i class="bi bi-file-earmark-excel"></i> Excel
+                            </button>
                         </div>
                         <div class="chart-card">
                             <h6><i class="bi bi-graph-up"></i> График динамики</h6>
@@ -1530,4 +1582,5 @@ console.log('✅ Клик по легенде - скрывает/показыв�
 console.log('✅ Столбцы НЕ НАЛЕЗАЮТ друг на друга (bargap=0.6)');
 console.log('📂 Боковая панель показывает все сканированные пути с разделителями');
 console.log('📊 Во всплывающих подсказках отображаются названия папок');
+console.log('📊 ДОБАВЛЕН ЭКСПОРТ В EXCEL С ГРАФИКОМ ДИНАМИКИ');
 console.log('💥 Пасхалка: нажми F2 для ЭПИЧНОГО взрыва "ЖАХ!"');

@@ -1,7 +1,7 @@
 import matplotlib
 matplotlib.use('Agg')
 
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, send_file
 import os
 import datetime
 import psycopg2
@@ -17,9 +17,21 @@ import subprocess
 import re
 import plotly.graph_objects as go
 from decimal import Decimal
+from io import BytesIO
+import xlsxwriter
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your-secret-key-here'
+
+# ============================================================
+# НАСТРОЙКА ПАПКИ ДЛЯ ОТЧЕТОВ
+# ============================================================
+
+# Создаем папку для отчетов, если ее нет
+REPORTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'reports')
+if not os.path.exists(REPORTS_DIR):
+    os.makedirs(REPORTS_DIR)
+    print(f"📁 Создана папка для отчетов: {REPORTS_DIR}")
 
 plt.rcParams['font.sans-serif'] = ['Arial', 'Tahoma', 'Verdana', 'DejaVu Sans']
 plt.rcParams['axes.unicode_minus'] = False
@@ -855,17 +867,10 @@ def create_chart_plotly(history_df, disk_path, parent_path, level=1):
         return None
 
 # ========================================================================
-# ФУНКЦИЯ СОЗДАНИЯ ГИСТОГРАММЫ - ОТДЕЛЬНЫЕ ПОДГИСТОГРАММЫ (SUBPLOTS)
+# ФУНКЦИЯ СОЗДАНИЯ ГИСТОГРАММЫ
 # ========================================================================
 
 def create_sectioned_histogram(history_data, path, level=1):
-    """
-    Создает ОТДЕЛЬНЫЕ подгистограммы для КАЖДОЙ папки с использованием subplots
-    Подгистограммы расположены ВЕРТИКАЛЬНО (одна под другой)
-    Столбцы ВЕРТИКАЛЬНЫЕ (растут вверх), ВПРИТЫК, разделены тонкими линиями
-    При одинаковом размере - общая подпись над группой столбцов
-    Даты ПОД КАЖДЫМ столбиком, ВЕРТИКАЛЬНЫЕ (снизу вверх)
-    """
     if not history_data or len(history_data) == 0:
         print("⚠️ create_sectioned_histogram: Нет данных для гистограммы")
         return None
@@ -873,9 +878,6 @@ def create_sectioned_histogram(history_data, path, level=1):
     print(f"📊 create_sectioned_histogram: Получено {len(history_data)} записей")
     
     try:
-        # ================================================================
-        # 1. Получаем все уникальные даты сканирований
-        # ================================================================
         all_dates = []
         for item in history_data:
             date = item.get('date', '')
@@ -889,9 +891,6 @@ def create_sectioned_histogram(history_data, path, level=1):
             print("⚠️ Нет дат в данных")
             return None
         
-        # ================================================================
-        # 2. Получаем все уникальные папки
-        # ================================================================
         all_folder_names = []
         for item in history_data:
             name = item.get('name', '')
@@ -904,7 +903,6 @@ def create_sectioned_histogram(history_data, path, level=1):
             print("⚠️ Нет папок в данных")
             return None
         
-        # Сортируем папки по среднему размеру
         folder_avg_sizes = []
         for name in all_folder_names:
             total = 0
@@ -920,9 +918,6 @@ def create_sectioned_histogram(history_data, path, level=1):
         folder_avg_sizes.sort(key=lambda x: x['avg'], reverse=True)
         sorted_folder_names = [f['name'] for f in folder_avg_sizes]
         
-        # ================================================================
-        # 3. Ограничиваем количество папок
-        # ================================================================
         MAX_FOLDERS = 15
         truncated = len(sorted_folder_names) > MAX_FOLDERS
         
@@ -935,37 +930,17 @@ def create_sectioned_histogram(history_data, path, level=1):
         
         print(f"📊 Отображаем папок: {len(display_folders)}")
         
-        # ================================================================
-        # 4. Палитра цветов
-        # ================================================================
         folder_colors = [
-            '#E67E22',  # Оранжевый
-            '#2980B9',  # Синий
-            '#27AE60',  # Зеленый
-            '#F1C40F',  # Желтый
-            '#8E44AD',  # Фиолетовый
-            '#E74C3C',  # Красный
-            '#1ABC9C',  # Бирюзовый
-            '#2C3E50',  # Темно-синий
-            '#F39C12',  # Оранжево-желтый
-            '#3498DB',  # Голубой
-            '#2ECC71',  # Светло-зеленый
-            '#9B59B6',  # Темно-фиолетовый
-            '#E67E22',  # Оранжевый
-            '#2980B9',  # Синий
-            '#27AE60'   # Зеленый
+            '#E67E22', '#2980B9', '#27AE60', '#F1C40F', '#8E44AD',
+            '#E74C3C', '#1ABC9C', '#2C3E50', '#F39C12', '#3498DB',
+            '#2ECC71', '#9B59B6'
         ]
-        
-        # ================================================================
-        # 5. СОЗДАЕМ SUBPLOTS
-        # ================================================================
         
         fig = go.Figure()
         
         max_height = 0
         folder_count = len(display_folders)
         
-        # Для каждой папки создаем отдельный трейс
         for idx, folder_name in enumerate(display_folders):
             x_values = []
             y_values = []
@@ -974,7 +949,6 @@ def create_sectioned_histogram(history_data, path, level=1):
             
             color = folder_colors[idx % len(folder_colors)]
             
-            # Сначала собираем все значения для этой папки
             values_by_date = []
             for date in all_dates:
                 found = None
@@ -992,25 +966,20 @@ def create_sectioned_histogram(history_data, path, level=1):
                 if val > max_height:
                     max_height = val
             
-            # Формируем данные для отображения с группировкой одинаковых значений
             i = 0
             while i < len(values_by_date):
                 current_val = values_by_date[i]['value']
                 j = i
-                # Находим все последовательные одинаковые значения
                 while j < len(values_by_date) and abs(values_by_date[j]['value'] - current_val) < 0.001:
                     j += 1
                 
-                # Количество одинаковых столбцов
                 count_same = j - i
                 
-                # Добавляем столбцы с одинаковыми значениями
                 for k in range(i, j):
                     date_data = values_by_date[k]
                     date = date_data['date']
                     val = date_data['value']
                     
-                    # Форматируем дату
                     date_parts = date.split(' ')
                     if len(date_parts) >= 2:
                         date_parts2 = date_parts[0].split('-')
@@ -1027,13 +996,12 @@ def create_sectioned_histogram(history_data, path, level=1):
                     y_values.append(val)
                     custom_data.append(f'{folder_name}\n{date}')
                     
-                    # Текст над столбцом - только если это первый столбец в группе одинаковых
                     if k == i and count_same > 1:
-                        text_labels.append(f'{val:.2f}')  # Один раз для группы
+                        text_labels.append(f'{val:.2f}')
                     elif k == i:
                         text_labels.append(f'{val:.2f}')
                     else:
-                        text_labels.append('')  # Пусто для остальных одинаковых
+                        text_labels.append('')
                 
                 i = j
             
@@ -1058,7 +1026,7 @@ def create_sectioned_histogram(history_data, path, level=1):
                 marker={
                     'color': color,
                     'line': {
-                        'color': 'rgba(0,0,0,0.15)',  # Тонкая разделительная линия
+                        'color': 'rgba(0,0,0,0.15)',
                         'width': 0.5
                     }
                 },
@@ -1068,7 +1036,7 @@ def create_sectioned_histogram(history_data, path, level=1):
                     '📊 Размер: %{y:.2f} ГБ<br>' +
                     '<extra></extra>'
                 ),
-                width=0.95,  # Почти вплотную
+                width=0.95,
                 showlegend=False,
                 orientation='v',
                 yaxis=f'y{axis_num}',
@@ -1077,9 +1045,6 @@ def create_sectioned_histogram(history_data, path, level=1):
         
         print(f"📊 Создано {len(display_folders)} подгистограмм")
         
-        # ================================================================
-        # 6. Добавляем "Остальные" папки если есть
-        # ================================================================
         if truncated and other_folders:
             x_values = []
             y_values = []
@@ -1099,7 +1064,6 @@ def create_sectioned_histogram(history_data, path, level=1):
                 if total > max_height:
                     max_height = total
             
-            # Группировка одинаковых значений
             i = 0
             while i < len(values_by_date):
                 current_val = values_by_date[i]['value']
@@ -1176,9 +1140,6 @@ def create_sectioned_histogram(history_data, path, level=1):
             print(f"📊 Добавлена подгистограмма 'Остальные'")
             folder_count += 1
         
-        # ================================================================
-        # 7. НАСТРОЙКА SUBPLOTS
-        # ================================================================
         path_name = path.split('\\')[-1] if path else 'Папка'
         level_text = f'Уровень {level}'
         
@@ -1230,7 +1191,6 @@ def create_sectioned_histogram(history_data, path, level=1):
             'bargroupgap': 0.0
         }
         
-        # Добавляем оси Y и X для каждой подгистограммы
         for i in range(folder_count):
             axis_num = i + 1
             yaxis_key = f'yaxis{axis_num}'
@@ -1285,7 +1245,6 @@ def create_sectioned_histogram(history_data, path, level=1):
                 'linewidth': 0.5
             }
         
-        # Добавляем аннотации
         annotations = []
         for i, folder_name in enumerate(display_folders):
             display_name = folder_name
@@ -1328,14 +1287,295 @@ def create_sectioned_histogram(history_data, path, level=1):
         chart_json = fig.to_json()
         
         print(f"✅ Создана гистограмма: {len(display_folders)} подгистограмм, {len(all_dates)} сканирований")
-        print(f"   📊 Ширина: {plot_width}px для горизонтального скролла")
-        print(f"   📊 Столбцы разделены тонкими линиями, при одинаковых значениях - общая подпись")
         return chart_json
         
     except Exception as e:
         print(f"❌ Ошибка создания гистограммы: {e}")
         traceback.print_exc()
         return None
+
+# ========================================================================
+# ФУНКЦИЯ ЭКСПОРТА В EXCEL
+# ========================================================================
+
+def generate_and_save_excel_report(path, disk_path, history_df, current_folders, level=1):
+    """Генерация Excel отчета и сохранение в папку reports"""
+    
+    import re
+    
+    path_parts = path.split('\\')
+    folder_name = path_parts[-1] if path_parts else path
+    
+    clean_name = re.sub(r'[^\w\-_.]', '_', folder_name)
+    clean_name = re.sub(r'_+', '_', clean_name)
+    clean_name = clean_name.strip('_')
+    
+    if not clean_name or len(clean_name) > 50:
+        clean_name = re.sub(r'[^\w\-_.]', '_', path.replace('\\', '_').replace(':', ''))
+        clean_name = re.sub(r'_+', '_', clean_name).strip('_')
+        if len(clean_name) > 50:
+            clean_name = clean_name[:50]
+    
+    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    filename = f"report_{clean_name}_{timestamp}.xlsx"
+    filepath = os.path.join(REPORTS_DIR, filename)
+    
+    print(f"📊 Генерация Excel отчета для уровня {level}: {filepath}")
+    
+    workbook = xlsxwriter.Workbook(filepath)
+    
+    header_format = workbook.add_format({
+        'bold': True,
+        'bg_color': '#2C3E50',
+        'font_color': 'white',
+        'border': 1,
+        'align': 'center',
+        'valign': 'vcenter'
+    })
+    
+    cell_format = workbook.add_format({
+        'border': 1,
+        'align': 'left',
+        'valign': 'vcenter'
+    })
+    
+    number_format = workbook.add_format({
+        'border': 1,
+        'align': 'right',
+        'valign': 'vcenter',
+        'num_format': '#,##0.00'
+    })
+    
+    date_format = workbook.add_format({
+        'border': 1,
+        'align': 'center',
+        'valign': 'vcenter',
+        'num_format': 'yyyy-mm-dd hh:mm'
+    })
+    
+    level_text = f"Уровень {level}"
+    
+    # ЛИСТ 1: Текущее состояние
+    sheet1 = workbook.add_worksheet('Текущие папки')
+    
+    headers1 = ['Папка', 'Размер (ГБ)', 'Размер (байт)', 'Уровень']
+    for col, header in enumerate(headers1):
+        sheet1.write(0, col, header, header_format)
+    
+    row = 1
+    total_size = 0
+    for folder in current_folders:
+        sheet1.write(row, 0, folder['name'], cell_format)
+        sheet1.write(row, 1, float(folder['size_gb']), number_format)
+        sheet1.write(row, 2, folder['size_bytes'], number_format)
+        sheet1.write(row, 3, folder.get('level', level), cell_format)
+        total_size += folder['size_bytes']
+        row += 1
+    
+    sheet1.write(row, 0, 'ИТОГО:', header_format)
+    sheet1.write(row, 1, round(total_size / (1024**3), 2), number_format)
+    sheet1.write(row, 2, total_size, number_format)
+    
+    sheet1.set_column('A:A', 35)
+    sheet1.set_column('B:B', 15)
+    sheet1.set_column('C:C', 18)
+    sheet1.set_column('D:D', 10)
+    
+    # ЛИСТ 2: Секционированные гистограммы
+    if not history_df.empty and history_df['scan_date'].nunique() >= 2:
+        sheet2 = workbook.add_worksheet('Гистограммы папок')
+        
+        sheet2.write(0, 0, f'📊 Секционированные гистограммы - {level_text}', header_format)
+        sheet2.write(0, 1, f'Путь: {path}', cell_format)
+        sheet2.write(0, 2, f'Папок: {len(current_folders)}', cell_format)
+        sheet2.write(0, 3, f'Сканирований: {history_df["scan_date"].nunique()}', cell_format)
+        
+        all_folders = history_df['item_name'].unique()
+        
+        folder_avg_sizes = []
+        for name in all_folders:
+            folder_data = history_df[history_df['item_name'] == name]
+            avg_size = folder_data['size_gb'].mean()
+            folder_avg_sizes.append({'name': name, 'avg': avg_size})
+        
+        folder_avg_sizes.sort(key=lambda x: x['avg'], reverse=True)
+        sorted_folders = [f['name'] for f in folder_avg_sizes]
+        
+        MAX_FOLDERS = 15
+        display_folders = sorted_folders[:MAX_FOLDERS]
+        
+        all_dates = sorted(history_df['scan_date'].unique())
+        date_strs = [d.strftime('%Y-%m-%d %H:%M') for d in all_dates]
+        
+        folder_colors = [
+            '#E67E22', '#2980B9', '#27AE60', '#F1C40F', '#8E44AD',
+            '#E74C3C', '#1ABC9C', '#2C3E50', '#F39C12', '#3498DB',
+            '#2ECC71', '#9B59B6', '#D35400', '#16A085', '#C0392B'
+        ]
+        
+        current_row = 2
+        chart_height = 250
+        chart_width = 900
+        
+        for idx, folder_name in enumerate(display_folders):
+            sheet2.write(current_row, 0, f'{idx+1}. 📁 {folder_name}', header_format)
+            sheet2.write(current_row, 1, f'Средний размер: {folder_avg_sizes[idx]["avg"]:.2f} ГБ', cell_format)
+            
+            folder_data = history_df[history_df['item_name'] == folder_name]
+            
+            size_map = {}
+            for _, row_data in folder_data.iterrows():
+                date_key = row_data['scan_date'].strftime('%Y-%m-%d %H:%M')
+                size_map[date_key] = float(row_data['size_gb'])
+            
+            data_start_row = current_row + 1
+            col_offset = 3
+            
+            sheet2.write(data_start_row, 0, 'Дата', header_format)
+            sheet2.write(data_start_row, 1, 'Размер (ГБ)', header_format)
+            
+            data_row = data_start_row + 1
+            max_val = 0
+            for date_str in date_strs:
+                val = size_map.get(date_str, 0)
+                sheet2.write(data_row, 0, date_str, date_format)
+                sheet2.write(data_row, 1, val, number_format)
+                if val > max_val:
+                    max_val = val
+                data_row += 1
+            
+            chart = workbook.add_chart({'type': 'column'})
+            
+            color = folder_colors[idx % len(folder_colors)]
+            
+            chart.add_series({
+                'name': folder_name,
+                'categories': f'=Гистограммы папок!$A${data_start_row + 1}:$A${data_row - 1}',
+                'values': f'=Гистограммы папок!$B${data_start_row + 1}:$B${data_row - 1}',
+                'fill': {'color': color},
+                'border': {'color': color},
+                'data_labels': {
+                    'value': True,
+                    'num_format': '0.00',
+                    'position': 'outside'
+                },
+                'gap': 30
+            })
+            
+            chart.set_title({'name': f'{folder_name} (max: {max_val:.2f} ГБ)'})
+            chart.set_x_axis({
+                'name': 'Дата сканирования',
+                'name_font': {'size': 9},
+                'num_font': {'size': 8, 'rotation': -45},
+                'label_position': 'low'
+            })
+            chart.set_y_axis({
+                'name': 'Размер (ГБ)',
+                'name_font': {'size': 9},
+                'num_font': {'size': 8}
+            })
+            chart.set_legend({'position': 'none'})
+            chart.set_size({'width': chart_width, 'height': chart_height})
+            
+            sheet2.insert_chart(data_start_row, col_offset, chart)
+            
+            sheet2.set_column('A:A', 20)
+            sheet2.set_column('B:B', 15)
+            
+            current_row = data_row + 4
+            sheet2.set_row(current_row, 10)
+        
+        info_row = current_row + 2
+        sheet2.write(info_row, 0, f'📊 Всего папок: {len(display_folders)} (показаны топ-{MAX_FOLDERS} из {len(all_folders)})', cell_format)
+        sheet2.write(info_row + 1, 0, f'📅 Сканирований: {len(date_strs)}', cell_format)
+        sheet2.write(info_row + 2, 0, f'📂 Путь: {path}', cell_format)
+        sheet2.write(info_row + 3, 0, f'📌 Уровень: {level_text}', cell_format)
+    
+    # ЛИСТ 3: График динамики
+    if not history_df.empty and history_df['scan_date'].nunique() >= 2:
+        sheet3 = workbook.add_worksheet('График динамики')
+        
+        sheet3.write(0, 0, f'📈 График динамики - {level_text}', header_format)
+        sheet3.write(0, 1, f'Путь: {path}', cell_format)
+        
+        sheet3.write(2, 0, 'Дата', header_format)
+        
+        folders = history_df['item_name'].unique()
+        folder_colors_line = [
+            '#E74C3C', '#3498DB', '#2ECC71', '#F39C12', '#9B59B6',
+            '#1ABC9C', '#E67E22', '#2980B9', '#27AE60', '#8E44AD'
+        ]
+        
+        for col, folder in enumerate(folders):
+            sheet3.write(2, col + 1, folder, header_format)
+        
+        dates = sorted(history_df['scan_date'].unique())
+        
+        row = 3
+        for date in dates:
+            date_str = date.strftime('%Y-%m-%d %H:%M')
+            sheet3.write(row, 0, date_str, date_format)
+            
+            for col, folder in enumerate(folders):
+                val = history_df[(history_df['scan_date'] == date) & (history_df['item_name'] == folder)]
+                if not val.empty:
+                    sheet3.write(row, col + 1, float(val['size_gb'].iloc[0]), number_format)
+                else:
+                    sheet3.write(row, col + 1, 0, number_format)
+            row += 1
+        
+        chart_line = workbook.add_chart({'type': 'line'})
+        
+        for col, folder in enumerate(folders):
+            color = folder_colors_line[col % len(folder_colors_line)]
+            chart_line.add_series({
+                'name': folder,
+                'categories': f'=График динамики!$A$3:$A${row - 1}',
+                'values': f'=График динамики!${chr(66 + col)}$3:${chr(66 + col)}${row - 1}',
+                'line': {'color': color, 'width': 2},
+                'marker': {'type': 'circle', 'size': 6, 'fill': {'color': color}},
+            })
+        
+        chart_line.set_title({'name': f'Динамика размера папок ({level_text})\n{path}'})
+        chart_line.set_x_axis({'name': 'Дата сканирования'})
+        chart_line.set_y_axis({'name': 'Размер (ГБ)'})
+        chart_line.set_legend({'position': 'right'})
+        chart_line.set_size({'width': 900, 'height': 450})
+        
+        sheet3.insert_chart('H3', chart_line)
+        sheet3.set_column('A:A', 20)
+        for col in range(1, len(folders) + 1):
+            sheet3.set_column(col, col, 15)
+    
+    # ЛИСТ 4: Информация
+    sheet4 = workbook.add_worksheet('Информация')
+    
+    info_format = workbook.add_format({'bold': True, 'bg_color': '#ecf0f1', 'border': 1})
+    
+    info_data = [
+        ['Путь', path],
+        ['Диск', disk_path],
+        ['Уровень', level_text],
+        ['Всего папок', len(current_folders)],
+        ['Общий размер', f"{round(total_size / (1024**3), 2)} ГБ ({total_size} байт)"],
+        ['Количество сканирований', history_df['scan_date'].nunique() if not history_df.empty else 0],
+        ['Первое сканирование', history_df['scan_date'].min().strftime('%Y-%m-%d %H:%M') if not history_df.empty else 'Нет данных'],
+        ['Последнее сканирование', history_df['scan_date'].max().strftime('%Y-%m-%d %H:%M') if not history_df.empty else 'Нет данных'],
+        ['Дата экспорта', datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')]
+    ]
+    
+    for row, (label, value) in enumerate(info_data):
+        sheet4.write(row, 0, label, info_format)
+        sheet4.write(row, 1, str(value), cell_format)
+    
+    sheet4.set_column('A:A', 25)
+    sheet4.set_column('B:B', 50)
+    
+    workbook.close()
+    
+    print(f"✅ Excel отчет сохранен: {filepath}")
+    return filepath, filename
+
 # ========================================================================
 # РОУТЫ FLASK
 # ========================================================================
@@ -1476,6 +1716,208 @@ def scan():
             'parent_chart': parent_chart,
             'parent_folder_history': parent_folder_history
         })
+    except Exception as e:
+        print(f"❌ Ошибка: {e}")
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/load_from_db', methods=['POST'])
+def load_from_db():
+    """Загрузка данных из БД для указанных путей (без сканирования)"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'Нет данных'}), 400
+        
+        paths = data.get('paths', [])
+        if not paths:
+            return jsonify({'error': 'Пути не указаны'}), 400
+        
+        results = []
+        for path in paths:
+            path = fix_path(path)
+            print(f"📡 Загрузка из БД для: {path}")
+            
+            conn = get_db_connection()
+            if not conn:
+                results.append({
+                    'path': path,
+                    'error': 'Ошибка подключения к БД',
+                    'success': False
+                })
+                continue
+            
+            try:
+                disk_path = get_disk_path(path)
+                
+                cursor = conn.cursor()
+                
+                # Проверяем, есть ли данные для этого пути
+                cursor.execute('''
+                    SELECT COUNT(*) 
+                    FROM scans 
+                    WHERE parent_path = %s AND item_type = 'ПАПКА'
+                ''', (path,))
+                count = cursor.fetchone()[0]
+                
+                if count == 0:
+                    # Попробуем найти данные для родительского пути
+                    path_parts = path.split('\\')
+                    if len(path_parts) >= 2:
+                        parent_path = '\\'.join(path_parts[:-1])
+                        folder_name = path_parts[-1]
+                        
+                        cursor.execute('''
+                            SELECT COUNT(*) 
+                            FROM scans 
+                            WHERE parent_path = %s AND item_name = %s AND item_type = 'ПАПКА'
+                        ''', (parent_path, folder_name))
+                        count = cursor.fetchone()[0]
+                        
+                        if count == 0:
+                            conn.close()
+                            results.append({
+                                'path': path,
+                                'error': 'Нет данных в БД для этого пути',
+                                'success': False
+                            })
+                            continue
+                
+                # Получаем последнюю дату сканирования для этого пути
+                cursor.execute('''
+                    SELECT MAX(scan_date) 
+                    FROM scans 
+                    WHERE parent_path = %s AND item_type = 'ПАПКА'
+                ''', (path,))
+                last_scan = cursor.fetchone()[0]
+                
+                if not last_scan:
+                    conn.close()
+                    results.append({
+                        'path': path,
+                        'error': 'Нет данных в БД для этого пути',
+                        'success': False
+                    })
+                    continue
+                
+                # Получаем папки
+                cursor.execute('''
+                    SELECT DISTINCT item_name, size_gb, size_bytes, level
+                    FROM scans 
+                    WHERE parent_path = %s 
+                    AND item_type = 'ПАПКА'
+                    AND scan_date = %s
+                    ORDER BY size_bytes DESC
+                ''', (path, last_scan))
+                
+                folders_data = cursor.fetchall()
+                
+                folders = []
+                total_size = 0
+                for row in folders_data:
+                    size_bytes = row[2]
+                    folders.append({
+                        'name': row[0],
+                        'size': size_bytes,
+                        'size_gb': float(row[1]),
+                        'size_str': format_size_auto(size_bytes),
+                        'path': f"{path}\\{row[0]}",
+                        'level': row[3]
+                    })
+                    total_size += size_bytes
+                
+                # Получаем уровень
+                cursor.execute('''
+                    SELECT DISTINCT level 
+                    FROM scans 
+                    WHERE parent_path = %s AND item_type = 'ПАПКА'
+                    ORDER BY level DESC
+                    LIMIT 1
+                ''', (path,))
+                level_row = cursor.fetchone()
+                current_level = level_row[0] if level_row else 1
+                
+                cursor.close()
+                conn.close()
+                
+                # Получаем историю для графиков
+                history_df = get_folder_history(disk_path, path)
+                
+                chart_json = None
+                scans_count = 0
+                
+                if not history_df.empty:
+                    scans_count = history_df['scan_date'].nunique()
+                    if scans_count > 1:
+                        chart_json = create_chart_plotly(history_df, disk_path, path, current_level)
+                
+                # Подготавливаем данные для гистограммы
+                histogram_data = []
+                if not history_df.empty:
+                    history_df_sorted = history_df.sort_values('scan_date')
+                    for _, row in history_df_sorted.iterrows():
+                        date_str = row['scan_date'].strftime('%Y-%m-%d %H:%M')
+                        histogram_data.append({
+                            'date': date_str,
+                            'name': row['item_name'],
+                            'size_gb': float(row['size_gb'])
+                        })
+                else:
+                    # Если нет истории, используем текущие данные
+                    current_date = datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
+                    for folder in folders:
+                        histogram_data.append({
+                            'date': current_date,
+                            'name': folder['name'],
+                            'size_gb': float(folder['size_gb'])
+                        })
+                
+                sectioned_histogram = None
+                if histogram_data and len(histogram_data) > 0:
+                    sectioned_histogram = create_sectioned_histogram(histogram_data, path, current_level)
+                
+                folder_history = get_folder_size_history(path)
+                
+                results.append({
+                    'success': True,
+                    'path': path,
+                    'folders_count': len(folders),
+                    'total_size': total_size,
+                    'total_size_str': format_size_auto(total_size),
+                    'folders': folders,
+                    'chart': chart_json,
+                    'scans_count': scans_count,
+                    'folder_history': folder_history,
+                    'histogram_data': histogram_data,
+                    'sectioned_histogram': sectioned_histogram,
+                    'level': current_level,
+                    'last_scan': last_scan.strftime('%Y-%m-%d %H:%M:%S'),
+                    'disk_path': disk_path
+                })
+                
+            except Exception as e:
+                print(f"❌ Ошибка загрузки для {path}: {e}")
+                traceback.print_exc()
+                if conn:
+                    conn.close()
+                results.append({
+                    'path': path,
+                    'error': str(e),
+                    'success': False
+                })
+        
+        # Фильтруем успешные результаты
+        valid_results = [r for r in results if r.get('success', False)]
+        errors = [r for r in results if not r.get('success', False)]
+        
+        return jsonify({
+            'results': valid_results,
+            'errors': errors,
+            'total': len(results),
+            'success_count': len(valid_results),
+            'error_count': len(errors)
+        })
+        
     except Exception as e:
         print(f"❌ Ошибка: {e}")
         traceback.print_exc()
@@ -1934,6 +2376,67 @@ def report():
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/export_excel', methods=['POST'])
+def export_excel():
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'Нет данных'}), 400
+        
+        path = data.get('path')
+        if not path:
+            return jsonify({'error': 'Путь не указан'}), 400
+        
+        path = fix_path(path)
+        print(f"📊 Экспорт Excel для: {path}")
+        
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({'error': 'Ошибка БД'}), 500
+        
+        disk_path = get_disk_path(path)
+        
+        history_df = get_folder_history(disk_path, path)
+        
+        if history_df.empty:
+            conn.close()
+            return jsonify({'error': 'Нет данных для экспорта'}), 400
+        
+        current_folders = get_current_folders(disk_path, path)
+        
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT DISTINCT level 
+            FROM scans 
+            WHERE parent_path = %s AND item_type = 'ПАПКА'
+            ORDER BY level DESC
+            LIMIT 1
+        ''', (path,))
+        level_row = cursor.fetchone()
+        current_level = level_row[0] if level_row else 1
+        cursor.close()
+        conn.close()
+        
+        filepath, filename = generate_and_save_excel_report(
+            path, 
+            disk_path, 
+            history_df, 
+            current_folders, 
+            current_level
+        )
+        
+        return send_file(
+            filepath,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=filename
+        )
+        
+    except Exception as e:
+        print(f"❌ Ошибка экспорта Excel: {e}")
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
 # ========================================================================
 # ЗАПУСК
 # ========================================================================
@@ -1943,17 +2446,11 @@ if __name__ == '__main__':
     print("\n" + "=" * 60)
     print("🚀 ЗАПУСК ВЕБ-ИНТЕРФЕЙСА")
     print("=" * 60)
+    print(f"📁 Папка для отчетов: {REPORTS_DIR}")
     print("🌐 Откройте: http://localhost:5000")
     print("📂 Поддерживается сканирование любого количества путей")
     print("📊 Для каждого пути свои графики")
-    print("📊 Навигация работает независимо для каждого пути")
-    print("📊 Данные для гистограмм берутся из истории сканирований")
-    print("📊 Папки второго уровня сканируются и сохраняются автоматически")
-    print("📊 Во всплывающих подсказках отображаются названия папок")
-    print("📊 Добавлена гистограмма с ОТДЕЛЬНЫМИ подгистограммами (SUBPLOTS) для каждой папки")
-    print("📊 Подписи дат ПОД каждым столбиком, ВЕРТИКАЛЬНЫЕ (снизу вверх)")
-    print("📊 Столбцы ВЕРТИКАЛЬНЫЕ (растут вверх), ВПРИТЫК")
-    print("📊 ГОРИЗОНТАЛЬНЫЙ СКРОЛЛ для большого количества сканирований")
-    print("📊 ВЕРТИКАЛЬНЫЙ СКРОЛЛ для большого количества папок")
+    print("📊 Добавлен экспорт в Excel с сохранением в папку reports")
+    print("📊 Добавлена кнопка 'Загрузить из БД' для быстрой загрузки данных")
     print("=" * 60 + "\n")
     app.run(debug=True, host='0.0.0.0', port=5000)
