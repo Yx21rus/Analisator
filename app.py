@@ -19,6 +19,8 @@ import plotly.graph_objects as go
 from decimal import Decimal
 from io import BytesIO
 import xlsxwriter
+import threading
+import time
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your-secret-key-here'
@@ -27,7 +29,6 @@ app.config['SECRET_KEY'] = 'your-secret-key-here'
 # НАСТРОЙКА ПАПКИ ДЛЯ ОТЧЕТОВ
 # ============================================================
 
-# Создаем папку для отчетов, если ее нет
 REPORTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'reports')
 if not os.path.exists(REPORTS_DIR):
     os.makedirs(REPORTS_DIR)
@@ -44,9 +45,16 @@ DB_CONFIG = {
     'password': ',fyfy,fyfy'
 }
 
-# ========================================================================
+# ============================================================
+# ХРАНИЛИЩЕ ПЛАНИРОВЩИКА
+# ============================================================
+
+scheduled_tasks = {}
+background_threads = {}
+
+# ============================================================
 # ФУНКЦИИ РАБОТЫ С БАЗОЙ ДАННЫХ
-# ========================================================================
+# ============================================================
 
 def get_db_connection():
     try:
@@ -108,6 +116,30 @@ def init_db():
             cursor.execute('CREATE INDEX idx_folder_history_date ON folder_size_history(scan_date)')
             print("✅ Таблица folder_size_history создана")
         
+        cursor.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_name = 'scheduler_tasks'
+            )
+        """)
+        if not cursor.fetchone()[0]:
+            cursor.execute('''
+                CREATE TABLE scheduler_tasks (
+                    id SERIAL PRIMARY KEY,
+                    task_id VARCHAR(255) NOT NULL UNIQUE,
+                    path TEXT NOT NULL,
+                    interval VARCHAR(50) NOT NULL,
+                    interval_minutes INTEGER NOT NULL,
+                    active BOOLEAN DEFAULT TRUE,
+                    started_at TIMESTAMP NOT NULL,
+                    last_scan TIMESTAMP,
+                    scan_count INTEGER DEFAULT 0,
+                    last_status VARCHAR(50) DEFAULT 'running'
+                )
+            ''')
+            cursor.execute('CREATE INDEX idx_scheduler_path ON scheduler_tasks(path)')
+            print("✅ Таблица scheduler_tasks создана")
+        
         conn.commit()
         return True
     except Exception as e:
@@ -117,9 +149,9 @@ def init_db():
         cursor.close()
         conn.close()
 
-# ========================================================================
+# ============================================================
 # ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
-# ========================================================================
+# ============================================================
 
 def get_size(path):
     total = 0
@@ -227,9 +259,9 @@ def detect_level(path, base_path):
     
     return 1
 
-# ========================================================================
+# ============================================================
 # ФУНКЦИИ СКАНИРОВАНИЯ
-# ========================================================================
+# ============================================================
 
 def scan_directory_with_levels(base_path, base_for_level=None):
     base_path = fix_path(base_path)
@@ -358,51 +390,134 @@ def get_network_shares(server):
     
     return shares
 
-def scan_directory(base_path):
-    base_path = fix_path(base_path)
-    path = Path(base_path)
-    if not path.exists():
-        return None, None
-    
-    items = []
-    total_size = 0
-    
-    try:
-        for item in path.iterdir():
-            try:
-                if item.is_dir():
-                    size = get_size(item)
-                    items.append({
-                        'name': item.name,
-                        'size': size,
-                        'size_str': format_size_auto(size),
-                        'path': str(item),
-                        'type': 'folder',
-                        'level': 0
-                    })
-                    total_size += size
-                elif item.is_file():
-                    size = item.stat().st_size
-                    items.append({
-                        'name': item.name,
-                        'size': size,
-                        'size_str': format_size_auto(size),
-                        'path': str(item),
-                        'type': 'file',
-                        'level': 0
-                    })
-                    total_size += size
-            except (PermissionError, OSError):
-                continue
-    except (PermissionError, OSError):
-        return None, None
-    
-    items.sort(key=lambda x: (x['type'] != 'folder', x['name'].lower()))
-    return items, total_size
+# ============================================================
+# ПЛАНИРОВЩИК СКАНИРОВАНИЙ (ФОНОВЫЙ ПОТОК) - БЕСКОНЕЧНЫЙ ЦИКЛ
+# ============================================================
 
-# ========================================================================
+def run_scheduled_scan(path, interval_minutes, task_id):
+    """Фоновый поток для периодического сканирования (БЕСКОНЕЧНЫЙ ЦИКЛ)"""
+    print(f"🔄 Запущен планировщик для {path}, интервал {interval_minutes} мин")
+    
+    # Сразу делаем первое сканирование
+    print(f"🔄 Первое сканирование для {path}")
+    try:
+        folders, stats = scan_directory_with_levels(path, path)
+        if folders is not None:
+            disk_path = get_disk_path(path)
+            save_scan_to_db(folders, path, disk_path, 1)
+            save_folder_size_history(path, stats[1])
+            
+            scheduled_tasks[task_id]['last_scan'] = datetime.datetime.now().isoformat()
+            scheduled_tasks[task_id]['scan_count'] += 1
+            scheduled_tasks[task_id]['last_status'] = 'success'
+            
+            # Обновляем в БД
+            conn = get_db_connection()
+            if conn:
+                cursor = conn.cursor()
+                try:
+                    cursor.execute('''
+                        UPDATE scheduler_tasks 
+                        SET last_scan = %s, scan_count = %s, last_status = %s
+                        WHERE task_id = %s
+                    ''', (datetime.datetime.now(), scheduled_tasks[task_id]['scan_count'], 'success', task_id))
+                    conn.commit()
+                except Exception as e:
+                    print(f"⚠️ Ошибка обновления БД: {e}")
+                finally:
+                    cursor.close()
+                    conn.close()
+            
+            print(f"✅ Первое сканирование для {path} завершено")
+    except Exception as e:
+        print(f"❌ Ошибка первого сканирования для {path}: {e}")
+        scheduled_tasks[task_id]['last_status'] = 'error'
+    
+    # БЕСКОНЕЧНЫЙ ЦИКЛ
+    while True:
+        # Проверяем, активен ли планировщик
+        if task_id not in scheduled_tasks or not scheduled_tasks[task_id].get('active', False):
+            print(f"⏹️ Планировщик для {path} остановлен")
+            break
+        
+        # Ждем указанный интервал
+        print(f"⏳ Ожидание {interval_minutes} мин до следующего сканирования {path}")
+        time.sleep(interval_minutes * 60)
+        
+        # Еще раз проверяем активность после ожидания
+        if task_id not in scheduled_tasks or not scheduled_tasks[task_id].get('active', False):
+            print(f"⏹️ Планировщик для {path} остановлен во время ожидания")
+            break
+        
+        # Выполняем сканирование
+        try:
+            print(f"🔄 Плановое сканирование для {path}")
+            
+            folders, stats = scan_directory_with_levels(path, path)
+            if folders is not None:
+                disk_path = get_disk_path(path)
+                save_scan_to_db(folders, path, disk_path, 1)
+                save_folder_size_history(path, stats[1])
+                
+                scheduled_tasks[task_id]['last_scan'] = datetime.datetime.now().isoformat()
+                scheduled_tasks[task_id]['scan_count'] += 1
+                scheduled_tasks[task_id]['last_status'] = 'success'
+                
+                # Обновляем в БД
+                conn = get_db_connection()
+                if conn:
+                    cursor = conn.cursor()
+                    try:
+                        cursor.execute('''
+                            UPDATE scheduler_tasks 
+                            SET last_scan = %s, scan_count = %s, last_status = %s
+                            WHERE task_id = %s
+                        ''', (datetime.datetime.now(), scheduled_tasks[task_id]['scan_count'], 'success', task_id))
+                        conn.commit()
+                    except Exception as e:
+                        print(f"⚠️ Ошибка обновления БД: {e}")
+                    finally:
+                        cursor.close()
+                        conn.close()
+                
+                print(f"✅ Плановое сканирование для {path} завершено (всего: {scheduled_tasks[task_id]['scan_count']})")
+                
+                # Сканирование подпапок второго уровня
+                for folder in folders:
+                    try:
+                        sub_path = Path(folder['path'])
+                        if sub_path.exists() and sub_path.is_dir():
+                            sub_folders = []
+                            for sub_item in sub_path.iterdir():
+                                if sub_item.is_dir():
+                                    try:
+                                        sub_size = get_size(sub_item)
+                                        sub_folders.append({
+                                            'name': sub_item.name,
+                                            'size': sub_size,
+                                            'size_gb': round(format_size_gb(sub_size), 4),
+                                            'size_str': format_size_auto(sub_size),
+                                            'path': str(sub_item),
+                                            'level': 2,
+                                            'parent_path': folder['path']
+                                        })
+                                    except (PermissionError, OSError):
+                                        pass
+                            if sub_folders:
+                                save_scan_to_db(sub_folders, folder['path'], disk_path, 2)
+                    except Exception as e:
+                        print(f"  ⚠️ Ошибка сканирования подпапок {folder['name']}: {e}")
+            else:
+                scheduled_tasks[task_id]['last_status'] = 'error'
+                print(f"❌ Ошибка планового сканирования для {path}")
+                
+        except Exception as e:
+            print(f"❌ Ошибка в планировщике для {path}: {e}")
+            scheduled_tasks[task_id]['last_status'] = 'error'
+
+# ============================================================
 # ФУНКЦИИ СОХРАНЕНИЯ В БД
-# ========================================================================
+# ============================================================
 
 def save_scan_to_db(folders, scan_path, disk_path="", level=1):
     if not folders:
@@ -474,9 +589,9 @@ def save_folder_size_history(folder_path, total_size_bytes):
         cursor.close()
         conn.close()
 
-# ========================================================================
+# ============================================================
 # ФУНКЦИИ ПОЛУЧЕНИЯ ДАННЫХ ИЗ БД
-# ========================================================================
+# ============================================================
 
 def get_folder_size_history(folder_path):
     conn = get_db_connection()
@@ -640,77 +755,9 @@ def get_current_folders(disk_path, parent_path):
     finally:
         conn.close()
 
-def get_folder_contents(disk_path, parent_path):
-    conn = get_db_connection()
-    if not conn:
-        return []
-    try:
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT DISTINCT item_name, size_gb, size_bytes, level
-            FROM scans 
-            WHERE disk_path = %s 
-            AND parent_path = %s 
-            AND item_type = 'ПАПКА'
-            AND scan_date = (
-                SELECT MAX(scan_date) 
-                FROM scans 
-                WHERE disk_path = %s AND parent_path = %s AND item_type = 'ПАПКА'
-            )
-            ORDER BY size_bytes DESC
-        ''', (disk_path, parent_path, disk_path, parent_path))
-        
-        data = cursor.fetchall()
-        
-        if not data:
-            path_parts = parent_path.split('\\')
-            if len(path_parts) >= 2:
-                folder_name = path_parts[-1]
-                parent_of_parent = '\\'.join(path_parts[:-1])
-                
-                cursor.execute('''
-                    SELECT item_name, size_gb, size_bytes, level
-                    FROM scans 
-                    WHERE disk_path = %s 
-                    AND parent_path = %s 
-                    AND item_name = %s
-                    AND item_type = 'ПАПКА'
-                    AND scan_date = (
-                        SELECT MAX(scan_date) 
-                        FROM scans 
-                        WHERE disk_path = %s AND parent_path = %s AND item_type = 'ПАПКА'
-                    )
-                ''', (disk_path, parent_of_parent, folder_name, disk_path, parent_of_parent))
-                folder_data = cursor.fetchone()
-                
-                if folder_data:
-                    cursor.execute('''
-                        SELECT DISTINCT item_name, size_gb, size_bytes, level
-                        FROM scans 
-                        WHERE disk_path = %s 
-                        AND parent_path = %s 
-                        AND item_type = 'ПАПКА'
-                        AND scan_date = (
-                            SELECT MAX(scan_date) 
-                            FROM scans 
-                            WHERE disk_path = %s AND parent_path = %s AND item_type = 'ПАПКА'
-                        )
-                        ORDER BY size_bytes DESC
-                    ''', (disk_path, parent_path, disk_path, parent_path))
-                    data = cursor.fetchall()
-        
-        cursor.close()
-        return [{'name': row[0], 'size_gb': round(float(row[1]), 4), 'size_bytes': row[2], 'level': row[3]} for row in data]
-    except Exception as e:
-        print(f"❌ Ошибка: {e}")
-        return []
-    finally:
-        conn.close()
-
-# ========================================================================
+# ============================================================
 # ФУНКЦИЯ ПОСТРОЕНИЯ ГРАФИКОВ
-# ========================================================================
+# ============================================================
 
 def create_chart_plotly(history_df, disk_path, parent_path, level=1):
     if history_df.empty:
@@ -866,9 +913,9 @@ def create_chart_plotly(history_df, disk_path, parent_path, level=1):
         traceback.print_exc()
         return None
 
-# ========================================================================
+# ============================================================
 # ФУНКЦИЯ СОЗДАНИЯ ГИСТОГРАММЫ
-# ========================================================================
+# ============================================================
 
 def create_sectioned_histogram(history_data, path, level=1):
     if not history_data or len(history_data) == 0:
@@ -1018,18 +1065,17 @@ def create_sectioned_histogram(history_data, path, level=1):
                 legendgroup=folder_name,
                 text=text_labels,
                 textposition='outside',
-                textfont={
-                    'size': 8,
-                    'color': '#2c3e50',
-                    'weight': 'bold'
-                },
-                marker={
-                    'color': color,
-                    'line': {
-                        'color': 'rgba(0,0,0,0.15)',
-                        'width': 0.5
-                    }
-                },
+                textfont=dict(
+                    size=8,
+                    color='#2c3e50'
+                ),
+                marker=dict(
+                    color=color,
+                    line=dict(
+                        color='rgba(0,0,0,0.15)',
+                        width=0.5
+                    )
+                ),
                 customdata=custom_data,
                 hovertemplate=(
                     '<b>%{customdata}</b><br>' +
@@ -1110,19 +1156,18 @@ def create_sectioned_histogram(history_data, path, level=1):
                 legendgroup='Остальные',
                 text=text_labels,
                 textposition='outside',
-                textfont={
-                    'size': 8,
-                    'color': '#7f8c8d',
-                    'weight': 'normal'
-                },
-                marker={
-                    'color': '#95A5A6',
-                    'opacity': 0.7,
-                    'line': {
-                        'color': 'rgba(0,0,0,0.1)',
-                        'width': 0.5
-                    }
-                },
+                textfont=dict(
+                    size=8,
+                    color='#7f8c8d'
+                ),
+                marker=dict(
+                    color='#95A5A6',
+                    opacity=0.7,
+                    line=dict(
+                        color='rgba(0,0,0,0.1)',
+                        width=0.5
+                    )
+                ),
                 customdata=custom_data,
                 hovertemplate=(
                     '<b>📦 Остальные папки</b><br>' +
@@ -1160,7 +1205,10 @@ def create_sectioned_histogram(history_data, path, level=1):
                     f' | Сканирований: {len(all_dates)}'
                     f'</span>'
                 ),
-                'font': {'size': 18, 'weight': 'bold', 'color': '#2c3e50'},
+                'font': {
+                    'size': 18,
+                    'color': '#2c3e50'
+                },
                 'x': 0.5
             },
             'height': 100 + folder_count * 210,
@@ -1294,13 +1342,11 @@ def create_sectioned_histogram(history_data, path, level=1):
         traceback.print_exc()
         return None
 
-# ========================================================================
+# ============================================================
 # ФУНКЦИЯ ЭКСПОРТА В EXCEL
-# ========================================================================
+# ============================================================
 
 def generate_and_save_excel_report(path, disk_path, history_df, current_folders, level=1):
-    """Генерация Excel отчета и сохранение в папку reports"""
-    
     import re
     
     path_parts = path.split('\\')
@@ -1355,7 +1401,6 @@ def generate_and_save_excel_report(path, disk_path, history_df, current_folders,
     
     level_text = f"Уровень {level}"
     
-    # ЛИСТ 1: Текущее состояние
     sheet1 = workbook.add_worksheet('Текущие папки')
     
     headers1 = ['Папка', 'Размер (ГБ)', 'Размер (байт)', 'Уровень']
@@ -1381,7 +1426,6 @@ def generate_and_save_excel_report(path, disk_path, history_df, current_folders,
     sheet1.set_column('C:C', 18)
     sheet1.set_column('D:D', 10)
     
-    # ЛИСТ 2: Секционированные гистограммы
     if not history_df.empty and history_df['scan_date'].nunique() >= 2:
         sheet2 = workbook.add_worksheet('Гистограммы папок')
         
@@ -1491,7 +1535,6 @@ def generate_and_save_excel_report(path, disk_path, history_df, current_folders,
         sheet2.write(info_row + 2, 0, f'📂 Путь: {path}', cell_format)
         sheet2.write(info_row + 3, 0, f'📌 Уровень: {level_text}', cell_format)
     
-    # ЛИСТ 3: График динамики
     if not history_df.empty and history_df['scan_date'].nunique() >= 2:
         sheet3 = workbook.add_worksheet('График динамики')
         
@@ -1547,7 +1590,6 @@ def generate_and_save_excel_report(path, disk_path, history_df, current_folders,
         for col in range(1, len(folders) + 1):
             sheet3.set_column(col, col, 15)
     
-    # ЛИСТ 4: Информация
     sheet4 = workbook.add_worksheet('Информация')
     
     info_format = workbook.add_format({'bold': True, 'bg_color': '#ecf0f1', 'border': 1})
@@ -1576,9 +1618,9 @@ def generate_and_save_excel_report(path, disk_path, history_df, current_folders,
     print(f"✅ Excel отчет сохранен: {filepath}")
     return filepath, filename
 
-# ========================================================================
+# ============================================================
 # РОУТЫ FLASK
-# ========================================================================
+# ============================================================
 
 @app.route('/')
 def index():
@@ -1652,10 +1694,11 @@ def scan():
         if not history_df.empty:
             scans_count = history_df['scan_date'].nunique()
             print(f"📊 Количество сканирований для {path}: {scans_count}")
-            if scans_count > 1:
-                chart_json = create_chart_plotly(history_df, disk_path, path, save_level)
-            else:
-                print(f"⚠️ Недостаточно данных для графика (нужно >= 2 сканирований) для {path}")
+            chart_json = create_chart_plotly(history_df, disk_path, path, save_level)
+            if chart_json is None:
+                print(f"⚠️ Не удалось создать график для {path}")
+        else:
+            print(f"⚠️ Нет данных истории для {path}")
         
         histogram_data = []
         if not history_df.empty:
@@ -1723,7 +1766,6 @@ def scan():
 
 @app.route('/api/load_from_db', methods=['POST'])
 def load_from_db():
-    """Загрузка данных из БД для указанных путей (без сканирования)"""
     try:
         data = request.get_json()
         if not data:
@@ -1752,7 +1794,6 @@ def load_from_db():
                 
                 cursor = conn.cursor()
                 
-                # Проверяем, есть ли данные для этого пути
                 cursor.execute('''
                     SELECT COUNT(*) 
                     FROM scans 
@@ -1761,7 +1802,6 @@ def load_from_db():
                 count = cursor.fetchone()[0]
                 
                 if count == 0:
-                    # Попробуем найти данные для родительского пути
                     path_parts = path.split('\\')
                     if len(path_parts) >= 2:
                         parent_path = '\\'.join(path_parts[:-1])
@@ -1783,7 +1823,6 @@ def load_from_db():
                             })
                             continue
                 
-                # Получаем последнюю дату сканирования для этого пути
                 cursor.execute('''
                     SELECT MAX(scan_date) 
                     FROM scans 
@@ -1800,7 +1839,6 @@ def load_from_db():
                     })
                     continue
                 
-                # Получаем папки
                 cursor.execute('''
                     SELECT DISTINCT item_name, size_gb, size_bytes, level
                     FROM scans 
@@ -1826,7 +1864,6 @@ def load_from_db():
                     })
                     total_size += size_bytes
                 
-                # Получаем уровень
                 cursor.execute('''
                     SELECT DISTINCT level 
                     FROM scans 
@@ -1840,7 +1877,6 @@ def load_from_db():
                 cursor.close()
                 conn.close()
                 
-                # Получаем историю для графиков
                 history_df = get_folder_history(disk_path, path)
                 
                 chart_json = None
@@ -1848,10 +1884,10 @@ def load_from_db():
                 
                 if not history_df.empty:
                     scans_count = history_df['scan_date'].nunique()
-                    if scans_count > 1:
-                        chart_json = create_chart_plotly(history_df, disk_path, path, current_level)
+                    chart_json = create_chart_plotly(history_df, disk_path, path, current_level)
+                    if chart_json is None:
+                        print(f"⚠️ Не удалось создать график для {path}")
                 
-                # Подготавливаем данные для гистограммы
                 histogram_data = []
                 if not history_df.empty:
                     history_df_sorted = history_df.sort_values('scan_date')
@@ -1863,7 +1899,6 @@ def load_from_db():
                             'size_gb': float(row['size_gb'])
                         })
                 else:
-                    # Если нет истории, используем текущие данные
                     current_date = datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
                     for folder in folders:
                         histogram_data.append({
@@ -1906,7 +1941,6 @@ def load_from_db():
                     'success': False
                 })
         
-        # Фильтруем успешные результаты
         valid_results = [r for r in results if r.get('success', False)]
         errors = [r for r in results if not r.get('success', False)]
         
@@ -2052,10 +2086,11 @@ def browse_from_db():
         if not history_df.empty:
             scans_count = history_df['scan_date'].nunique()
             print(f"📊 Количество сканирований для {path}: {scans_count}")
-            if scans_count > 1:
-                chart_json = create_chart_plotly(history_df, disk_path, path, current_level)
-            else:
-                print(f"⚠️ Недостаточно данных для графика (нужно >= 2 сканирований) для {path}")
+            chart_json = create_chart_plotly(history_df, disk_path, path, current_level)
+            if chart_json is None:
+                print(f"⚠️ Не удалось создать график для {path}")
+        else:
+            print(f"⚠️ Нет данных истории для {path}")
         
         histogram_data = []
         if not history_df.empty:
@@ -2167,8 +2202,12 @@ def get_parent_data():
         history_df = get_folder_history(disk_path, path)
         chart_json = None
         
-        if not history_df.empty and history_df['scan_date'].nunique() > 1:
+        if not history_df.empty:
             chart_json = create_chart_plotly(history_df, disk_path, path, current_level)
+            if chart_json is None:
+                print(f"⚠️ Не удалось создать график для {path}")
+        else:
+            print(f"⚠️ Нет данных истории для {path}")
         
         folder_history = get_folder_size_history(path)
         current_folders = get_current_folders(disk_path, path)
@@ -2182,6 +2221,14 @@ def get_parent_data():
                     'date': date_str,
                     'name': row['item_name'],
                     'size_gb': float(row['size_gb'])
+                })
+        elif current_folders and len(current_folders) > 0:
+            current_date = datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
+            for folder in current_folders:
+                histogram_data.append({
+                    'date': current_date,
+                    'name': folder['name'],
+                    'size_gb': float(folder['size_gb'])
                 })
         
         sectioned_histogram = None
@@ -2302,8 +2349,12 @@ def report():
         current_folders = get_current_folders(disk_path, path)
         
         chart_json = None
-        if not history_df.empty and history_df['scan_date'].nunique() > 1:
+        if not history_df.empty:
             chart_json = create_chart_plotly(history_df, disk_path, path, current_level)
+            if chart_json is None:
+                print(f"⚠️ Не удалось создать график для {path}")
+        else:
+            print(f"⚠️ Нет данных истории для {path}")
         
         histogram_data = []
         if not history_df.empty:
@@ -2316,6 +2367,15 @@ def report():
                     'size_gb': float(row['size_gb'])
                 })
             print(f"📊 Подготовлено {len(histogram_data)} записей для гистограммы из истории для {path}")
+        elif current_folders and len(current_folders) > 0:
+            current_date = datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
+            for folder in current_folders:
+                histogram_data.append({
+                    'date': current_date,
+                    'name': folder['name'],
+                    'size_gb': float(folder['size_gb'])
+                })
+            print(f"📊 Создано {len(histogram_data)} записей для гистограммы из текущих папок для {path}")
         
         sectioned_histogram = None
         if histogram_data and len(histogram_data) > 0:
@@ -2437,9 +2497,244 @@ def export_excel():
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
-# ========================================================================
+# ============================================================
+# РОУТЫ ПЛАНИРОВЩИКА
+# ============================================================
+
+@app.route('/api/scheduler/start', methods=['POST'])
+def start_scheduler():
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'Нет данных'}), 400
+        
+        path = data.get('path')
+        interval = data.get('interval')
+        
+        if not path or not interval:
+            return jsonify({'error': 'Путь и интервал обязательны'}), 400
+        
+        path = fix_path(path)
+        
+        interval_map = {
+            '1min': 1,
+            '30min': 30,
+            'hour': 60,
+            'day': 1440,
+            'week': 10080,
+            'month': 43200,
+            '3months': 129600,
+            '6months': 259200,
+            '12months': 518400
+        }
+        
+        interval_minutes = interval_map.get(interval)
+        if not interval_minutes:
+            return jsonify({'error': 'Неверный интервал'}), 400
+        
+        # Останавливаем существующий планировщик для этого пути
+        existing_task_id = None
+        for task_id, task in scheduled_tasks.items():
+            if task.get('path') == path and task.get('active', False):
+                existing_task_id = task_id
+                break
+        
+        if existing_task_id:
+            scheduled_tasks[existing_task_id]['active'] = False
+            if existing_task_id in background_threads:
+                background_threads[existing_task_id] = None
+        
+        task_id = f"scheduler_{int(time.time())}_{hash(path) % 10000}"
+        
+        scheduled_tasks[task_id] = {
+            'path': path,
+            'interval': interval,
+            'interval_minutes': interval_minutes,
+            'active': True,
+            'started_at': datetime.datetime.now().isoformat(),
+            'last_scan': None,
+            'scan_count': 0,
+            'last_status': 'running'
+        }
+        
+        # Сохраняем в БД
+        conn = get_db_connection()
+        if conn:
+            cursor = conn.cursor()
+            try:
+                cursor.execute('''
+                    INSERT INTO scheduler_tasks (task_id, path, interval, interval_minutes, active, started_at, last_scan, scan_count, last_status)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (task_id) DO UPDATE SET
+                        path = EXCLUDED.path,
+                        interval = EXCLUDED.interval,
+                        interval_minutes = EXCLUDED.interval_minutes,
+                        active = EXCLUDED.active,
+                        started_at = EXCLUDED.started_at,
+                        last_scan = EXCLUDED.last_scan,
+                        scan_count = EXCLUDED.scan_count,
+                        last_status = EXCLUDED.last_status
+                ''', (task_id, path, interval, interval_minutes, True, datetime.datetime.now(), None, 0, 'running'))
+                conn.commit()
+            except Exception as e:
+                print(f"⚠️ Ошибка сохранения в БД: {e}")
+            finally:
+                cursor.close()
+                conn.close()
+        
+        # ЗАПУСКАЕМ ПОТОК
+        thread = threading.Thread(
+            target=run_scheduled_scan,
+            args=(path, interval_minutes, task_id),
+            daemon=True
+        )
+        thread.start()
+        background_threads[task_id] = thread
+        
+        print(f"✅ Планировщик запущен для {path} (интервал: {interval})")
+        
+        return jsonify({
+            'success': True,
+            'task_id': task_id,
+            'path': path,
+            'interval': interval,
+            'message': f'Планировщик запущен для {path}'
+        })
+        
+    except Exception as e:
+        print(f"❌ Ошибка запуска планировщика: {e}")
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/scheduler/stop', methods=['POST'])
+def stop_scheduler():
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'Нет данных'}), 400
+        
+        path = data.get('path')
+        if not path:
+            return jsonify({'error': 'Путь не указан'}), 400
+        
+        path = fix_path(path)
+        
+        print(f"⏹️ Поиск планировщика для остановки: {path}")
+        
+        # Ищем задачу по пути
+        task_id_to_stop = None
+        for task_id, task in scheduled_tasks.items():
+            if task.get('path') == path and task.get('active', False):
+                task_id_to_stop = task_id
+                break
+        
+        if not task_id_to_stop:
+            print(f"❌ Активный планировщик для {path} не найден")
+            return jsonify({'error': 'Активный планировщик для этого пути не найден'}), 404
+        
+        print(f"✅ Найдена задача: {task_id_to_stop}")
+        
+        # Останавливаем
+        scheduled_tasks[task_id_to_stop]['active'] = False
+        scheduled_tasks[task_id_to_stop]['last_status'] = 'stopped'
+        
+        # Обновляем в БД
+        conn = get_db_connection()
+        if conn:
+            cursor = conn.cursor()
+            try:
+                cursor.execute('''
+                    UPDATE scheduler_tasks 
+                    SET active = FALSE, last_status = 'stopped'
+                    WHERE task_id = %s
+                ''', (task_id_to_stop,))
+                conn.commit()
+                print(f"✅ Обновлено в БД: {task_id_to_stop}")
+            except Exception as e:
+                print(f"⚠️ Ошибка обновления БД: {e}")
+            finally:
+                cursor.close()
+                conn.close()
+        
+        print(f"⏹️ Планировщик остановлен для {path}")
+        
+        return jsonify({
+            'success': True,
+            'path': path,
+            'message': f'Планировщик остановлен для {path}'
+        })
+        
+    except Exception as e:
+        print(f"❌ Ошибка остановки планировщика: {e}")
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/scheduler/status', methods=['GET'])
+def get_scheduler_status():
+    try:
+        statuses = []
+        for task_id, task in scheduled_tasks.items():
+            statuses.append({
+                'task_id': task_id,
+                'path': task['path'],
+                'interval': task['interval'],
+                'active': task.get('active', False),
+                'started_at': task.get('started_at'),
+                'last_scan': task.get('last_scan'),
+                'scan_count': task.get('scan_count', 0),
+                'last_status': task.get('last_status', 'unknown')
+            })
+        
+        return jsonify(statuses)
+        
+    except Exception as e:
+        print(f"❌ Ошибка получения статуса: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/scheduler/path_status', methods=['POST'])
+def get_path_scheduler_status():
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'Нет данных'}), 400
+        
+        path = data.get('path')
+        if not path:
+            return jsonify({'error': 'Путь не указан'}), 400
+        
+        path = fix_path(path)
+        
+        print(f"📊 Запрос статуса для: {path}")
+        
+        for task_id, task in scheduled_tasks.items():
+            if task.get('path') == path:
+                print(f"  ✅ Найдена задача: {task_id}, active: {task.get('active', False)}")
+                return jsonify({
+                    'task_id': task_id,
+                    'path': task['path'],
+                    'interval': task['interval'],
+                    'active': task.get('active', False),
+                    'started_at': task.get('started_at'),
+                    'last_scan': task.get('last_scan'),
+                    'scan_count': task.get('scan_count', 0),
+                    'last_status': task.get('last_status', 'unknown')
+                })
+        
+        print(f"  ❌ Задача для {path} не найдена")
+        return jsonify({
+            'path': path,
+            'active': False,
+            'message': 'Нет активного планировщика для этого пути'
+        })
+        
+    except Exception as e:
+        print(f"❌ Ошибка: {e}")
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+# ============================================================
 # ЗАПУСК
-# ========================================================================
+# ============================================================
 
 if __name__ == '__main__':
     init_db()
@@ -2452,5 +2747,9 @@ if __name__ == '__main__':
     print("📊 Для каждого пути свои графики")
     print("📊 Добавлен экспорт в Excel с сохранением в папку reports")
     print("📊 Добавлена кнопка 'Загрузить из БД' для быстрой загрузки данных")
+    print("⏰ Добавлен ПЛАНИРОВЩИК сканирования в боковой панели")
+    print("⏰ Добавлен интервал '1 мин' для тестирования")
+    print("📊 Графики теперь отображаются даже при 1 сканировании (с сообщением)")
+    print("🔄 Планировщик работает в БЕСКОНЕЧНОМ ЦИКЛЕ с периодическими сканированиями")
     print("=" * 60 + "\n")
     app.run(debug=True, host='0.0.0.0', port=5000)

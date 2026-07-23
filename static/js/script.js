@@ -4,6 +4,9 @@
 var pathsToScan = [];
 var multipleDataStore = {};
 var currentPathId = null;
+var openPaths = [];
+var scheduledTasks = {};
+var refreshIntervals = {};
 
 // ============================================================
 // ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
@@ -66,8 +69,217 @@ function normalizeUncPath(path) {
     return path;
 }
 
+function scrollToTop() {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function getIntervalLabel(interval) {
+    var labels = {
+        '1min': '1 мин',
+        '30min': '30 мин',
+        'hour': 'Час',
+        'day': 'День',
+        'week': 'Неделя',
+        'month': 'Месяц',
+        '3months': '3 мес',
+        '6months': '6 мес',
+        '12months': '12 мес'
+    };
+    return labels[interval] || interval;
+}
+
+function getIntervalLabelShort(interval) {
+    var labels = {
+        '1min': '1м',
+        '30min': '30м',
+        'hour': 'Час',
+        'day': 'День',
+        'week': 'Нед',
+        'month': 'Мес',
+        '3months': '3м',
+        '6months': '6м',
+        '12months': '12м'
+    };
+    return labels[interval] || interval;
+}
+
 // ============================================================
-// УПРАВЛЕНИЕ ПУТЯМИ
+// УПРАВЛЕНИЕ СПИСКОМ ОТКРЫТЫХ КАТАЛОГОВ
+// ============================================================
+
+function findOpenPathByPath(path) {
+    return openPaths.find(function(item) { 
+        return item.path.toLowerCase() === path.toLowerCase(); 
+    });
+}
+
+function findOpenPathById(pathId) {
+    return openPaths.find(function(item) { 
+        return item.pathId === pathId; 
+    });
+}
+
+function addOpenPath(pathId, path, type) {
+    var existing = findOpenPathByPath(path);
+    if (existing) {
+        existing.pathId = pathId;
+        existing.type = type;
+        updateOpenPathsList();
+        return existing;
+    }
+    
+    var newItem = {
+        pathId: pathId,
+        path: path,
+        type: type || 'scan'
+    };
+    openPaths.push(newItem);
+    updateOpenPathsList();
+    return newItem;
+}
+
+function removeOpenPath(pathId) {
+    var index = openPaths.findIndex(function(item) { return item.pathId === pathId; });
+    if (index === -1) return;
+    
+    var path = openPaths[index].path;
+    openPaths.splice(index, 1);
+    
+    var pathIndex = pathsToScan.indexOf(path);
+    if (pathIndex !== -1) {
+        pathsToScan.splice(pathIndex, 1);
+        updatePathTags();
+    }
+    
+    if (multipleDataStore[pathId]) {
+        delete multipleDataStore[pathId];
+    }
+    
+    var card = document.getElementById('accordion-' + pathId);
+    if (card) {
+        card.remove();
+    }
+    
+    var section = document.getElementById('folderTreeSection_' + pathId);
+    if (section) {
+        section.remove();
+    }
+    
+    updateOpenPathsList();
+    updateSidebar();
+    
+    if (Object.keys(multipleDataStore).length === 0) {
+        document.getElementById('reportSection').style.display = 'none';
+        document.getElementById('mainContent').innerHTML = '';
+    }
+    
+    showToast('🗑️ Закрыт каталог: ' + path, 'info');
+}
+
+function updateOpenPathsList() {
+    var container = document.getElementById('openPathsContainer');
+    var list = document.getElementById('openPathsList');
+    var count = document.getElementById('openPathsCount');
+    
+    if (openPaths.length === 0) {
+        if (container) container.style.display = 'none';
+        return;
+    }
+    
+    if (container) container.style.display = 'block';
+    if (count) count.textContent = openPaths.length;
+    
+    var html = '';
+    openPaths.forEach(function(item) {
+        var shortPath = item.path;
+        if (shortPath.length > 40) {
+            shortPath = '...' + shortPath.substring(shortPath.length - 37);
+        }
+        var badgeClass = item.type === 'scan' ? 'scan' : (item.type === 'scheduler' ? 'scheduler' : 'db');
+        var badgeText = item.type === 'scan' ? 'Скан' : (item.type === 'scheduler' ? 'План' : 'БД');
+        html += `
+            <div class="open-path-item">
+                <span class="path-badge ${badgeClass}">${badgeText}</span>
+                <span class="path-name" title="${item.path}">${shortPath}</span>
+                <button class="path-close-btn" onclick="removeOpenPath('${item.pathId}')" title="Закрыть каталог">
+                    <i class="bi bi-x-circle"></i>
+                </button>
+            </div>
+        `;
+    });
+    if (list) list.innerHTML = html;
+}
+
+// ============================================================
+// ФУНКЦИЯ ЭКСПОРТА В EXCEL
+// ============================================================
+
+function exportExcelForPath(pathId, path) {
+    if (!path) {
+        var store = multipleDataStore[pathId];
+        if (store) {
+            path = store.currentPath || store.rootPath;
+        }
+    }
+    
+    if (!path) {
+        showToast('❌ Путь не найден', 'error');
+        return;
+    }
+    
+    try {
+        path = decodeURIComponent(path);
+    } catch (e) {}
+    
+    showToast('📊 Генерация Excel отчета для: ' + path, 'info');
+    document.getElementById('loading').style.display = 'block';
+    
+    fetch('/api/export_excel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: path })
+    })
+    .then(function(response) {
+        document.getElementById('loading').style.display = 'none';
+        
+        if (!response.ok) {
+            return response.json().then(function(err) {
+                throw new Error(err.error || 'Ошибка сервера');
+            });
+        }
+        
+        var filename = 'report.xlsx';
+        var contentDisposition = response.headers.get('Content-Disposition');
+        if (contentDisposition) {
+            var match = contentDisposition.match(/filename=([^;]+)/);
+            if (match) {
+                filename = match[1];
+            }
+        }
+        
+        return response.blob().then(function(blob) {
+            return { blob: blob, filename: filename };
+        });
+    })
+    .then(function(result) {
+        var url = URL.createObjectURL(result.blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = result.filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(function() { URL.revokeObjectURL(url); }, 100);
+        showToast('✅ Excel отчет скачан: ' + result.filename, 'success');
+    })
+    .catch(function(e) {
+        document.getElementById('loading').style.display = 'none';
+        showToast('❌ Ошибка экспорта: ' + e.message, 'error');
+    });
+}
+
+// ============================================================
+// УПРАВЛЕНИЕ ПУТЯМИ ДЛЯ СКАНИРОВАНИЯ
 // ============================================================
 
 function addPath() {
@@ -89,14 +301,18 @@ function removePath(path) {
 
 function updatePathTags() {
     var container = document.getElementById('pathTags');
-    var btn = document.getElementById('scanBtn');
+    var scanBtn = document.getElementById('scanBtn');
+    var loadBtn = document.getElementById('loadFromDbBtn');
     var info = document.getElementById('pathCountInfo');
+    
     if (pathsToScan.length === 0) {
-        container.innerHTML = '<div class="empty-paths">Нет добавленных путей</div>';
-        btn.disabled = true;
-        info.textContent = 'Добавьте путь для сканирования';
+        if (container) container.innerHTML = '<div class="empty-paths">Нет добавленных путей</div>';
+        if (scanBtn) scanBtn.disabled = true;
+        if (loadBtn) loadBtn.disabled = true;
+        if (info) info.textContent = 'Добавьте путь для сканирования или загрузки';
         return;
     }
+    
     var html = '';
     pathsToScan.forEach(function(p) {
         var escapedPath = p.replace(/\\/g, '\\\\');
@@ -105,9 +321,10 @@ function updatePathTags() {
             '<span class="remove-path" onclick="removePath(\'' + escapedPath + '\')">&times;</span>' +
         '</span>';
     });
-    container.innerHTML = html;
-    btn.disabled = false;
-    info.textContent = 'Готово: ' + pathsToScan.length + ' путь(ей)';
+    if (container) container.innerHTML = html;
+    if (scanBtn) scanBtn.disabled = false;
+    if (loadBtn) loadBtn.disabled = false;
+    if (info) info.textContent = 'Готово: ' + pathsToScan.length + ' путь(ей)';
 }
 
 document.getElementById('pathInput').addEventListener('keypress', function(e) {
@@ -124,7 +341,7 @@ function loadPaths() {
         .then(function(paths) {
             var container = document.getElementById('pathsList');
             if (paths.length === 0) {
-                container.innerHTML = '<div class="text-center text-muted py-4"><i class="bi bi-inbox" style="font-size:2rem;"></i><p class="mt-2">Нет сохраненных сканирований</p></div>';
+                if (container) container.innerHTML = '<div class="text-center text-muted py-4"><i class="bi bi-inbox" style="font-size:2rem;"></i><p class="mt-2">Нет сохраненных сканирований</p></div>';
                 return;
             }
             var html = '<div class="list-group">';
@@ -136,14 +353,13 @@ function loadPaths() {
                 '</div>';
             });
             html += '</div>';
-            container.innerHTML = html;
+            if (container) container.innerHTML = html;
         })
         .catch(function(e) { console.error('Ошибка:', e); });
 }
 
 function scanSinglePath(path) {
     var normalizedPath = normalizeUncPath(path);
-    console.log('📤 Отправка пути:', normalizedPath);
     return fetch('/api/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -161,9 +377,71 @@ function scanSinglePath(path) {
     });
 }
 
+function loadFromDB() {
+    if (pathsToScan.length === 0) {
+        showToast('Добавьте путь', 'warning');
+        return;
+    }
+    
+    var btn = document.getElementById('loadFromDbBtn');
+    var progress = document.getElementById('scanProgress');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Загрузка...';
+    }
+    if (progress) progress.style.display = 'block';
+    
+    fetch('/api/load_from_db', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paths: pathsToScan })
+    })
+    .then(function(response) {
+        if (!response.ok) {
+            return response.json().then(function(err) {
+                throw new Error(err.error || 'Ошибка сервера');
+            });
+        }
+        return response.json();
+    })
+    .then(function(data) {
+        if (data.error) {
+            showToast('❌ ' + data.error, 'error');
+            return;
+        }
+        
+        if (data.errors && data.errors.length > 0) {
+            data.errors.forEach(function(err) {
+                showToast('⚠️ ' + err.path + ': ' + err.error, 'warning');
+            });
+        }
+        
+        if (data.results.length === 0) {
+            showToast('❌ Нет данных для загрузки', 'error');
+            return;
+        }
+        
+        showToast('✅ Загружено из БД: ' + data.results.length + ' путей', 'success');
+        loadPaths();
+        showMultipleReports(data.results, 'db');
+    })
+    .catch(function(error) {
+        console.error('❌ Ошибка:', error);
+        showToast('❌ Ошибка загрузки: ' + error.message, 'error');
+    })
+    .finally(function() {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-database-fill"></i> Загрузить из БД';
+        }
+        if (progress) progress.style.display = 'none';
+    });
+}
+
+document.getElementById('loadFromDbBtn').addEventListener('click', loadFromDB);
+
 function browseFromDB(path) {
     var normalizedPath = normalizeUncPath(path);
-    console.log('📤 Просмотр из БД:', normalizedPath);
     return fetch('/api/browse_from_db', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -183,7 +461,6 @@ function browseFromDB(path) {
 
 function getChartFromDB(path) {
     var normalizedPath = normalizeUncPath(path);
-    console.log('📊 Запрос графика из БД для:', normalizedPath);
     return fetch('/api/parent_data', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -202,72 +479,6 @@ function getChartFromDB(path) {
 }
 
 // ============================================================
-// ЭКСПОРТ В EXCEL - ГЛОБАЛЬНАЯ ФУНКЦИЯ
-// ============================================================
-
-window.exportExcel = function(pathId) {
-    console.log('📊 exportExcel вызвана для pathId:', pathId);
-    
-    var store = multipleDataStore[pathId];
-    console.log('📊 store:', store);
-    
-    if (!store) {
-        showToast('❌ Нет данных для экспорта', 'error');
-        return;
-    }
-    
-    var path = store.currentPath || store.rootPath;
-    console.log('📊 path:', path);
-    
-    if (!path) {
-        showToast('❌ Путь не найден', 'error');
-        return;
-    }
-    
-    showToast('📊 Генерация Excel отчета...', 'info');
-    document.getElementById('loading').style.display = 'block';
-    
-    fetch('/api/export_excel', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: path })
-    })
-    .then(function(response) {
-        document.getElementById('loading').style.display = 'none';
-        console.log('📊 Ответ получен, статус:', response.status);
-        
-        if (!response.ok) {
-            return response.json().then(function(err) {
-                throw new Error(err.error || 'Ошибка сервера');
-            });
-        }
-        
-        return response.blob().then(function(blob) {
-            console.log('📊 Получен blob, размер:', blob.size);
-            var url = URL.createObjectURL(blob);
-            var a = document.createElement('a');
-            a.href = url;
-            a.download = 'report.xlsx';
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            setTimeout(function() {
-                URL.revokeObjectURL(url);
-            }, 100);
-            
-            showToast('✅ Excel отчет скачан', 'success');
-        });
-    })
-    .catch(function(e) {
-        document.getElementById('loading').style.display = 'none';
-        console.error('❌ Ошибка экспорта:', e);
-        showToast('❌ Ошибка экспорта: ' + e.message, 'error');
-    });
-};
-
-console.log('✅ window.exportExcel доступна:', typeof window.exportExcel === 'function');
-
-// ============================================================
 // РЕНДЕРИНГ ГРАФИКОВ
 // ============================================================
 
@@ -276,20 +487,14 @@ function renderChart(chartData, divId, pathId) {
     if (!div) return;
     
     if (!chartData) {
-        div.innerHTML = `
-            <div class="text-center text-muted py-3">
-                <i class="bi bi-bar-chart" style="font-size:2rem;display:block;margin-bottom:6px;"></i>
-                <p style="font-size:0.9rem;">Нет данных для графика</p>
-                <small>Нужно минимум 2 сканирования</small>
-            </div>
-        `;
+        div.innerHTML = '';
         return;
     }
     
     try {
         var data = typeof chartData === 'string' ? JSON.parse(chartData) : chartData;
         
-        if (data && data.data && Array.isArray(data.data)) {
+        if (data && data.data && Array.isArray(data.data) && data.data.length > 0) {
             var plotId = div.id || divId;
             Plotly.purge(plotId);
             
@@ -322,35 +527,55 @@ function renderChart(chartData, divId, pathId) {
         console.log('📊 Ошибка парсинга графика:', e);
     }
     
-    if (typeof chartData === 'string' && chartData.startsWith('iVBOR')) {
-        div.innerHTML = '<img src="data:image/png;base64,' + chartData + '" class="img-fluid" style="width:100%;max-height:350px;">';
-        return;
-    }
-    
-    div.innerHTML = `
-        <div class="text-center text-muted py-3">
-            <i class="bi bi-exclamation-triangle" style="font-size:2rem;display:block;margin-bottom:6px;color:#f39c12;"></i>
-            <p style="font-size:0.9rem;">Не удалось загрузить график</p>
-        </div>
-    `;
+    div.innerHTML = '';
 }
 
 // ============================================================
-// ФУНКЦИЯ ДЛЯ СЕКЦИОНИРОВАННОЙ ГИСТОГРАММЫ
+// РЕНДЕРИНГ ГИСТОГРАММЫ С СОХРАНЕНИЕМ ГОРИЗОНТАЛЬНОГО СКРОЛЛА
 // ============================================================
 
 function renderSectionedHistogram(chartData, divId, pathId) {
     var div = document.getElementById(divId);
     if (!div) {
-        console.error('❌ Div для секционированной гистограммы не найден:', divId);
+        console.error('❌ Div для гистограммы не найден:', divId);
         return;
     }
+    
+    // Проверяем, есть ли уже обертка со скроллом
+    var wrapper = div.closest('.histogram-scroll-wrapper');
+    var innerDiv = div;
+    
+    // Если обертки нет, создаем ее
+    if (!wrapper) {
+        var parent = div.parentElement;
+        
+        wrapper = document.createElement('div');
+        wrapper.className = 'histogram-scroll-wrapper';
+        
+        var newInner = document.createElement('div');
+        newInner.className = 'histogram-inner';
+        newInner.id = div.id;
+        
+        wrapper.appendChild(newInner);
+        parent.insertBefore(wrapper, div);
+        parent.removeChild(div);
+        
+        div = newInner;
+    } else {
+        var inner = wrapper.querySelector('.histogram-inner');
+        if (inner) {
+            div = inner;
+            div.id = divId;
+        }
+    }
+    
+    div.innerHTML = '';
     
     if (!chartData) {
         div.innerHTML = `
             <div class="text-center text-muted py-3">
                 <i class="bi bi-bar-chart" style="font-size:2rem;display:block;margin-bottom:6px;"></i>
-                <p style="font-size:0.9rem;">Нет данных для секционированной гистограммы</p>
+                <p style="font-size:0.9rem;">Нет данных для гистограммы</p>
                 <small>Нужно минимум 2 сканирования</small>
             </div>
         `;
@@ -360,27 +585,26 @@ function renderSectionedHistogram(chartData, divId, pathId) {
     try {
         var data = typeof chartData === 'string' ? JSON.parse(chartData) : chartData;
         
-        if (data && data.data && Array.isArray(data.data)) {
+        if (data && data.data && Array.isArray(data.data) && data.data.length > 0) {
             var plotId = div.id || divId;
             Plotly.purge(plotId);
             
             var traces = data.data;
             var layout = data.layout || {};
             
-            // Исправляем все трейсы
             traces.forEach(function(trace, index) {
                 trace.orientation = 'v';
                 trace.type = 'bar';
                 
-                if (!trace.width || trace.width > 0.5) {
-                    trace.width = 0.35;
+                if (!trace.width) {
+                    trace.width = 0.95;
                 }
                 
                 if (!trace.textposition) {
                     trace.textposition = 'outside';
                 }
                 if (!trace.textfont) {
-                    trace.textfont = { size: 7, color: '#2d3436' };
+                    trace.textfont = { size: 8, color: '#2c3e50' };
                 }
                 
                 if (trace.hovertemplate) {
@@ -391,49 +615,139 @@ function renderSectionedHistogram(chartData, divId, pathId) {
                     var dataLen = trace.x ? trace.x.length : 0;
                     trace.customdata = Array(dataLen).fill(trace.name);
                 }
+                
+                if (!trace.marker) {
+                    trace.marker = {};
+                }
+                if (!trace.marker.line) {
+                    trace.marker.line = {
+                        color: 'rgba(0,0,0,0.12)',
+                        width: 0.5
+                    };
+                }
             });
             
             layout.barmode = 'group';
-            layout.bargap = 0.6;
+            layout.bargap = 0.25;
             layout.bargroupgap = 0.0;
             
-            layout.height = 460;
+            var folderCount = traces.length;
+            var calculatedHeight = 100 + folderCount * 210;
+            layout.height = Math.max(400, Math.min(1500, calculatedHeight));
+            
             if (!layout.margin) {
-                layout.margin = { l: 50, r: 20, t: 60, b: 100 };
+                layout.margin = { l: 80, r: 30, t: 80, b: 40 };
+            }
+            
+            if (layout.xaxis) {
+                layout.xaxis.tickangle = -90;
+                layout.xaxis.tickfont = layout.xaxis.tickfont || { size: 7 };
+            }
+            
+            for (var key in layout) {
+                if (key.startsWith('xaxis')) {
+                    if (!layout[key].tickangle) {
+                        layout[key].tickangle = -90;
+                    }
+                    if (!layout[key].tickfont) {
+                        layout[key].tickfont = { size: 7 };
+                    }
+                }
             }
             
             if (!layout.legend) {
                 layout.legend = {};
             }
-            layout.legend.orientation = 'h';
-            layout.legend.x = 0.5;
-            layout.legend.y = 1.02;
-            layout.legend.xanchor = 'center';
-            layout.legend.yanchor = 'bottom';
-            layout.legend.font = layout.legend.font || { size: 7 };
+            layout.legend.orientation = 'v';
+            layout.legend.x = 1.02;
+            layout.legend.y = 1;
+            layout.legend.xanchor = 'left';
+            layout.legend.yanchor = 'top';
+            layout.legend.font = layout.legend.font || { size: 9, color: '#2c3e50' };
             layout.legend.itemwidth = 30;
+            layout.legend.bgcolor = 'rgba(255,255,255,0.95)';
+            layout.legend.bordercolor = '#e0e0e0';
+            layout.legend.borderwidth = 1;
             
-            layout.plot_bgcolor = layout.plot_bgcolor || '#f8f9fa';
-            layout.paper_bgcolor = layout.paper_bgcolor || 'white';
+            layout.plot_bgcolor = layout.plot_bgcolor || '#ffffff';
+            layout.paper_bgcolor = layout.paper_bgcolor || '#ffffff';
             layout.dragmode = false;
+            
+            var dateCount = 0;
+            if (traces.length > 0 && traces[0].x) {
+                dateCount = traces[0].x.length;
+            }
+            var minWidth = Math.max(800, dateCount * 70 + 200);
+            layout.width = Math.min(2000, minWidth);
+            
+            if (wrapper) {
+                wrapper.style.overflowX = 'auto';
+                wrapper.style.overflowY = 'hidden';
+                wrapper.style.width = '100%';
+                wrapper.style.position = 'relative';
+                wrapper.style.background = 'white';
+                wrapper.style.borderRadius = '8px';
+                wrapper.style.border = '1px solid #e9ecef';
+                wrapper.style.padding = '5px 0';
+            }
+            
+            if (div) {
+                div.style.minWidth = '100%';
+                div.style.width = 'auto';
+                div.style.padding = '5px 10px';
+                div.style.display = 'inline-block';
+            }
             
             Plotly.newPlot(plotId, traces, layout, { 
                 responsive: true,
                 displaylogo: false,
                 modeBarButtonsToRemove: ['toImage', 'sendDataToCloud', 'zoom2d', 'pan2d', 'select2d', 'lasso2d', 'zoomIn2d', 'zoomOut2d', 'autoScale2d', 'resetScale2d']
             });
+            
+            var indicator = wrapper.querySelector('.scroll-indicator');
+            if (!indicator) {
+                indicator = document.createElement('div');
+                indicator.className = 'scroll-indicator';
+                indicator.innerHTML = `
+                    <span class="scroll-arrow" onclick="scrollHistogram('${divId}', -200)">◀</span>
+                    <span class="badge bg-secondary">Горизонтальная прокрутка</span>
+                    <span class="scroll-arrow" onclick="scrollHistogram('${divId}', 200)">▶</span>
+                `;
+                wrapper.appendChild(indicator);
+            }
+            
             return;
         }
     } catch (e) {
-        console.log('📊 Ошибка парсинга секционированной гистограммы:', e);
+        console.log('📊 Ошибка парсинга гистограммы:', e);
     }
     
     div.innerHTML = `
         <div class="text-center text-muted py-3">
             <i class="bi bi-exclamation-triangle" style="font-size:2rem;display:block;margin-bottom:6px;color:#f39c12;"></i>
-            <p style="font-size:0.9rem;">Не удалось загрузить секционированную гистограмму</p>
+            <p style="font-size:0.9rem;">Не удалось загрузить гистограмму</p>
         </div>
     `;
+}
+
+// ============================================================
+// ФУНКЦИЯ ДЛЯ СКРОЛЛА ГИСТОГРАММЫ
+// ============================================================
+
+function scrollHistogram(divId, delta) {
+    var wrapper = document.getElementById(divId);
+    if (!wrapper) {
+        wrapper = document.querySelector('#' + divId + ' .histogram-scroll-wrapper');
+    }
+    if (!wrapper) {
+        var div = document.getElementById(divId);
+        if (div) {
+            wrapper = div.closest('.histogram-scroll-wrapper');
+        }
+    }
+    if (wrapper) {
+        wrapper.scrollLeft += delta;
+    }
 }
 
 // ============================================================
@@ -452,45 +766,54 @@ function loadChartsFromDB(pathId, path) {
     getChartFromDB(path)
         .then(function(data) {
             console.log('📊 Получены данные из БД для:', path);
-            console.log('📊 sectioned_histogram:', data.sectioned_histogram ? 'есть' : 'нет');
             
-            if (data.scans_count > 0) {
+            if (data.scans_count !== undefined && data.scans_count > 0) {
                 store.scansCount = data.scans_count;
             }
             
-            // ГРАФИК УРОВНЯ 1
-            if (data.chart) {
-                renderChart(data.chart, 'level1ChartDiv_' + pathId, pathId);
-            } else {
-                var chartDiv = document.getElementById('level1ChartDiv_' + pathId);
-                if (chartDiv) {
-                    chartDiv.innerHTML = `
+            var scansEl = document.getElementById('statScans_' + pathId);
+            if (scansEl && store.scansCount !== undefined) {
+                scansEl.textContent = store.scansCount;
+            }
+            var accordionScansEl = document.getElementById('accordionStatScans_' + pathId);
+            if (accordionScansEl && store.scansCount !== undefined) {
+                accordionScansEl.textContent = store.scansCount;
+            }
+            
+            var chartDiv1 = document.getElementById('level1ChartDiv_' + pathId);
+            if (chartDiv1) {
+                if (data.chart) {
+                    renderChart(data.chart, 'level1ChartDiv_' + pathId, pathId);
+                } else {
+                    chartDiv1.innerHTML = `
                         <div class="text-center text-muted py-3">
                             <i class="bi bi-bar-chart" style="font-size:2rem;display:block;margin-bottom:6px;"></i>
                             <p style="font-size:0.9rem;">Нет данных для графика</p>
                             <small>Нужно минимум 2 сканирования</small>
+                            <br>
+                            <small class="text-primary">Запустите планировщик для накопления данных</small>
                         </div>
                     `;
                 }
             }
             
-            // СЕКЦИОНИРОВАННАЯ ГИСТОГРАММА УРОВНЯ 1
-            if (data.sectioned_histogram) {
-                renderSectionedHistogram(data.sectioned_histogram, 'level1HistogramDiv_' + pathId, pathId);
-            } else {
-                var histDiv = document.getElementById('level1HistogramDiv_' + pathId);
-                if (histDiv) {
-                    histDiv.innerHTML = `
+            var histDiv1 = document.getElementById('level1HistogramDiv_' + pathId);
+            if (histDiv1) {
+                if (data.sectioned_histogram) {
+                    renderSectionedHistogram(data.sectioned_histogram, 'level1HistogramDiv_' + pathId, pathId);
+                } else {
+                    histDiv1.innerHTML = `
                         <div class="text-center text-muted py-3">
                             <i class="bi bi-bar-chart" style="font-size:2rem;display:block;margin-bottom:6px;"></i>
                             <p style="font-size:0.9rem;">Нет данных для гистограммы</p>
                             <small>Нужно минимум 2 сканирования</small>
+                            <br>
+                            <small class="text-primary">Запустите планировщик для накопления данных</small>
                         </div>
                     `;
                 }
             }
             
-            // ГРАФИКИ УРОВНЯ 2 - если активен
             var level2Section = document.getElementById('level2Section_' + pathId);
             if (level2Section && level2Section.classList.contains('active')) {
                 var currentPath = store.currentPath;
@@ -500,13 +823,12 @@ function loadChartsFromDB(pathId, path) {
                     getChartFromDB(currentPath)
                         .then(function(data2) {
                             console.log('📊 Получены данные уровня 2 для:', currentPath);
-                            console.log('📊 sectioned_histogram уровня 2:', data2.sectioned_histogram ? 'есть' : 'нет');
                             
-                            if (data2.chart) {
-                                renderChart(data2.chart, 'level2ChartDiv_' + pathId, pathId);
-                            } else {
-                                var chartDiv2 = document.getElementById('level2ChartDiv_' + pathId);
-                                if (chartDiv2) {
+                            var chartDiv2 = document.getElementById('level2ChartDiv_' + pathId);
+                            if (chartDiv2) {
+                                if (data2.chart) {
+                                    renderChart(data2.chart, 'level2ChartDiv_' + pathId, pathId);
+                                } else {
                                     chartDiv2.innerHTML = `
                                         <div class="text-center text-muted py-3">
                                             <i class="bi bi-bar-chart" style="font-size:2rem;display:block;margin-bottom:6px;"></i>
@@ -517,11 +839,11 @@ function loadChartsFromDB(pathId, path) {
                                 }
                             }
                             
-                            if (data2.sectioned_histogram) {
-                                renderSectionedHistogram(data2.sectioned_histogram, 'level2HistogramDiv_' + pathId, pathId);
-                            } else {
-                                var histDiv2 = document.getElementById('level2HistogramDiv_' + pathId);
-                                if (histDiv2) {
+                            var histDiv2 = document.getElementById('level2HistogramDiv_' + pathId);
+                            if (histDiv2) {
+                                if (data2.sectioned_histogram) {
+                                    renderSectionedHistogram(data2.sectioned_histogram, 'level2HistogramDiv_' + pathId, pathId);
+                                } else {
                                     histDiv2.innerHTML = `
                                         <div class="text-center text-muted py-3">
                                             <i class="bi bi-bar-chart" style="font-size:2rem;display:block;margin-bottom:6px;"></i>
@@ -542,7 +864,8 @@ function loadChartsFromDB(pathId, path) {
                 }
             }
             
-            showToast('📊 Графики обновлены из БД', 'success');
+            updateAccordionHeader(pathId);
+            showToast('📊 Графики обновлены', 'success');
         })
         .catch(function(e) {
             console.error('❌ Ошибка загрузки графиков:', e);
@@ -551,34 +874,698 @@ function loadChartsFromDB(pathId, path) {
 }
 
 // ============================================================
-// БОКОВАЯ ПАНЕЛЬ
+// ПЛАНИРОВЩИК - ДОБАВЛЕНИЕ ПУТИ
 // ============================================================
 
-function buildFolderTree(pathId, folders, rootPath, currentPath, level) {
-    var container = document.getElementById('folderTreeContainer_' + pathId);
-    if (!container) {
-        var mainContainer = document.getElementById('folderTreeContainer');
-        if (!mainContainer) return;
-        
-        var section = document.createElement('div');
-        section.id = 'folderTreeSection_' + pathId;
-        section.className = 'folder-tree-section';
-        
-        var header = document.createElement('div');
-        header.className = 'folder-tree-header';
-        header.innerHTML = `
-            <span><i class="bi bi-folder"></i> <span class="path-text" title="${rootPath}">${rootPath}</span></span>
-            <span class="badge bg-secondary">${folders ? folders.length : 0}</span>
+function addPathToScheduler() {
+    var input = document.getElementById('schedulerPathInput');
+    var path = input.value.trim();
+    
+    if (!path) {
+        showToast('⚠️ Введите путь для планировщика', 'warning');
+        return;
+    }
+    
+    path = normalizeUncPath(path);
+    
+    var schedulerPaths = getSchedulerPaths();
+    var exists = schedulerPaths.some(function(p) { 
+        return p.toLowerCase() === path.toLowerCase(); 
+    });
+    
+    if (exists) {
+        showToast('⚠️ Путь уже добавлен в планировщик', 'warning');
+        return;
+    }
+    
+    addSchedulerPath(path);
+    input.value = '';
+    showToast('✅ Путь добавлен в планировщик: ' + path, 'success');
+}
+
+// ============================================================
+// ПОЛУЧЕНИЕ СПИСКА ПУТЕЙ ИЗ ПЛАНИРОВЩИКА (localStorage)
+// ============================================================
+
+function getSchedulerPaths() {
+    try {
+        return JSON.parse(localStorage.getItem('schedulerPaths') || '[]');
+    } catch (e) {
+        return [];
+    }
+}
+
+function setSchedulerPaths(paths) {
+    localStorage.setItem('schedulerPaths', JSON.stringify(paths));
+}
+
+function addSchedulerPath(path) {
+    var paths = getSchedulerPaths();
+    if (!paths.some(function(p) { return p.toLowerCase() === path.toLowerCase(); })) {
+        paths.push(path);
+        setSchedulerPaths(paths);
+        renderSchedulerList();
+    }
+}
+
+function removeSchedulerPathFromList(path) {
+    var paths = getSchedulerPaths();
+    paths = paths.filter(function(p) { return p.toLowerCase() !== path.toLowerCase(); });
+    setSchedulerPaths(paths);
+    renderSchedulerList();
+}
+
+// ============================================================
+// ОТОБРАЖЕНИЕ СПИСКА ПУТЕЙ В ПЛАНИРОВЩИКЕ
+// ============================================================
+
+function renderSchedulerList() {
+    var container = document.getElementById('schedulerList');
+    if (!container) return;
+    
+    var paths = getSchedulerPaths();
+    var countBadge = document.getElementById('schedulerCountBadge');
+    if (countBadge) countBadge.textContent = paths.length;
+    
+    if (paths.length === 0) {
+        container.innerHTML = `
+            <div class="empty-scheduler" id="emptySchedulerMessage">
+                <i class="bi bi-clock" style="font-size:1.5rem;display:block;margin-bottom:6px;"></i>
+                <span style="font-size:0.8rem;color:#6c757d;">Нет путей в планировщике</span>
+                <br>
+                <small style="font-size:0.65rem;color:#adb5bd;">Добавьте путь выше</small>
+            </div>
         `;
-        section.appendChild(header);
+        return;
+    }
+    
+    var html = '';
+    paths.forEach(function(path) {
+        var shortPath = path.length > 40 ? '...' + path.substring(path.length - 37) : path;
+        var pathId = 'scheduler_' + path.replace(/[\\:]/g, '_');
         
-        var treeContainer = document.createElement('div');
-        treeContainer.id = 'folderTreeContainer_' + pathId;
-        treeContainer.className = 'folder-tree-content';
-        section.appendChild(treeContainer);
+        var isActive = false;
+        var activeInterval = null;
+        for (var taskId in scheduledTasks) {
+            if (scheduledTasks[taskId].path === path && scheduledTasks[taskId].active) {
+                isActive = true;
+                activeInterval = scheduledTasks[taskId].interval;
+                break;
+            }
+        }
         
-        mainContainer.appendChild(section);
-        container = treeContainer;
+        var statusClass = isActive ? 'running' : 'stopped';
+        var statusText = isActive ? '🟢 ' + getIntervalLabel(activeInterval) : '⚪ Не активен';
+        var escapedPath = path.replace(/\\/g, '\\\\');
+        
+        var intervals = ['1min', '30min', 'hour', 'day', 'week', 'month', '3months', '6months', '12months'];
+        var intervalLabels = ['1м', '30м', 'Час', 'День', 'Нед', 'Мес', '3м', '6м', '12м'];
+        var intervalTitles = ['1 минута', '30 минут', 'Час', 'День', 'Неделя', 'Месяц', '3 месяца', '6 месяцев', '12 месяцев'];
+        
+        html += `
+            <div class="scheduler-item" id="schedulerItem_${pathId}">
+                <div class="scheduler-item-path">
+                    <span class="status-dot ${statusClass}" id="schedulerDot_${pathId}"></span>
+                    <span class="path-text" title="${path}">${shortPath}</span>
+                    <span class="scheduler-status-badge" id="schedulerStatusBadge_${pathId}">
+                        ${statusText}
+                    </span>
+                    
+                    <div class="scheduler-interval-buttons">`;
+        
+        for (var i = 0; i < intervals.length; i++) {
+            var isActiveInterval = (isActive && activeInterval === intervals[i]);
+            var activeClass = isActiveInterval ? 'active' : '';
+            html += `
+                        <button class="btn-scheduler-interval ${activeClass}" 
+                                onclick="startSchedulerForPath('${escapedPath}', '${intervals[i]}', event)" 
+                                title="${intervalTitles[i]}">
+                            ${intervalLabels[i]}
+                        </button>`;
+        }
+        
+        html += `
+                    </div>
+                    
+                    <div class="scheduler-actions">
+                        <button class="btn-scheduler-start ${isActive ? 'hidden' : ''}" 
+                                id="startSchedulerBtn_${pathId}" 
+                                onclick="startSchedulerForPath('${escapedPath}', 'hour', event)" 
+                                title="Запустить планировщик">
+                            ▶
+                        </button>
+                        <button class="btn-scheduler-stop ${!isActive ? 'hidden' : ''}" 
+                                id="stopSchedulerBtn_${pathId}" 
+                                onclick="stopSchedulerForPath('${escapedPath}', event)" 
+                                title="Остановить планировщик">
+                            ⏹
+                        </button>
+                        <button class="btn-open-report" 
+                                onclick="openReportFromScheduler('${escapedPath}')" 
+                                title="Открыть отчет в правой панели">
+                            <i class="bi bi-folder-open"></i> Открыть
+                        </button>
+                        <button class="btn-remove-scheduler" 
+                                onclick="removeSchedulerPath('${escapedPath}')" 
+                                title="Удалить из планировщика">
+                            <i class="bi bi-x"></i>
+                        </button>
+                    </div>
+                    <span class="scheduler-info" id="schedulerInfo_${pathId}"></span>
+                </div>
+            </div>
+        `;
+    });
+    
+    container.innerHTML = html;
+}
+
+// ============================================================
+// ОТКРЫТЬ ОТЧЕТ ИЗ ПЛАНИРОВЩИКА
+// ============================================================
+
+function openReportFromScheduler(path) {
+    var normalizedPath = normalizeUncPath(path);
+    console.log('📂 Открытие отчета из планировщика для:', normalizedPath);
+    showToast('📂 Открытие отчета для: ' + normalizedPath, 'info');
+    
+    document.getElementById('loading').style.display = 'block';
+    
+    fetch('/api/report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: normalizedPath })
+    })
+    .then(function(response) { return response.json(); })
+    .then(function(data) {
+        document.getElementById('loading').style.display = 'none';
+        
+        if (data.error) {
+            showToast('❌ Ошибка: ' + data.error, 'error');
+            return;
+        }
+        
+        if (!data.folders || data.folders.length === 0) {
+            showToast('⚠️ Нет данных для этого пути. Запустите сканирование.', 'warning');
+            return;
+        }
+        
+        console.log('📊 Получены данные для отчета:', data);
+        console.log('📊 Количество папок:', data.folders.length);
+        console.log('📊 Сканирований:', data.scans_count);
+        
+        var existing = findOpenPathByPath(normalizedPath);
+        
+        if (existing) {
+            showToast('ℹ️ Отчет уже открыт: ' + normalizedPath, 'info');
+            var accordion = document.getElementById('accordion-' + existing.pathId);
+            if (accordion) {
+                accordion.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                var body = document.getElementById('accordionBody_' + existing.pathId);
+                var toggle = document.getElementById('accordionToggle_' + existing.pathId);
+                if (body) body.classList.add('show');
+                if (toggle) toggle.classList.remove('collapsed');
+            }
+            updateExistingReport(existing.pathId, data, 'scheduler');
+            return;
+        }
+        
+        showMultipleReports([data], 'scheduler');
+        
+        setTimeout(function() {
+            var newExisting = findOpenPathByPath(normalizedPath);
+            if (newExisting) {
+                var accordion = document.getElementById('accordion-' + newExisting.pathId);
+                if (accordion) {
+                    accordion.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    var body = document.getElementById('accordionBody_' + newExisting.pathId);
+                    var toggle = document.getElementById('accordionToggle_' + newExisting.pathId);
+                    if (body) body.classList.add('show');
+                    if (toggle) toggle.classList.remove('collapsed');
+                }
+            }
+            updateSidebar();
+        }, 500);
+        
+        showToast('✅ Отчет открыт: ' + normalizedPath + ' (' + data.folders.length + ' папок)', 'success');
+    })
+    .catch(function(e) {
+        document.getElementById('loading').style.display = 'none';
+        console.error('❌ Ошибка открытия отчета:', e);
+        showToast('❌ Ошибка: ' + e.message, 'error');
+    });
+}
+
+// ============================================================
+// ЗАПУСК ПЛАНИРОВЩИКА ДЛЯ ПУТИ
+// ============================================================
+
+function startSchedulerForPath(path, interval, event) {
+    if (event) event.stopPropagation();
+    
+    var normalizedPath = normalizeUncPath(path);
+    console.log('▶️ Запуск планировщика для:', normalizedPath, 'интервал:', interval);
+    showToast('⏳ Запуск планировщика для: ' + normalizedPath, 'info');
+    
+    var pathId = 'scheduler_' + path.replace(/[\\:]/g, '_');
+    var buttons = document.querySelectorAll('#schedulerItem_' + pathId + ' .btn-scheduler-interval');
+    buttons.forEach(function(b) { b.classList.remove('active'); });
+    if (event) {
+        var btn = event.currentTarget;
+        if (btn) btn.classList.add('active');
+    }
+    
+    document.getElementById('loading').style.display = 'block';
+    
+    fetch('/api/scheduler/stop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: normalizedPath })
+    })
+    .then(function() {
+        if (refreshIntervals[normalizedPath]) {
+            clearInterval(refreshIntervals[normalizedPath]);
+            delete refreshIntervals[normalizedPath];
+        }
+        
+        for (var taskId in scheduledTasks) {
+            if (scheduledTasks[taskId].path === normalizedPath) {
+                delete scheduledTasks[taskId];
+                break;
+            }
+        }
+        
+        return fetch('/api/scheduler/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: normalizedPath, interval: interval })
+        });
+    })
+    .then(function(response) { return response.json(); })
+    .then(function(data) {
+        document.getElementById('loading').style.display = 'none';
+        if (data.error) {
+            showToast('❌ ' + data.error, 'error');
+            return;
+        }
+        
+        console.log('✅ Планировщик запущен:', data);
+        
+        if (!scheduledTasks[data.task_id]) {
+            scheduledTasks[data.task_id] = {
+                path: normalizedPath,
+                interval: interval,
+                active: true
+            };
+        } else {
+            scheduledTasks[data.task_id].active = true;
+            scheduledTasks[data.task_id].interval = interval;
+        }
+        
+        setTimeout(function() {
+            var buttons2 = document.querySelectorAll('#schedulerItem_' + pathId + ' .btn-scheduler-interval');
+            buttons2.forEach(function(b) { 
+                b.classList.remove('active');
+                if (b.textContent.trim() === getIntervalLabelShort(interval)) {
+                    b.classList.add('active');
+                }
+            });
+        }, 100);
+        
+        showToast('✅ Планировщик запущен для: ' + normalizedPath + ' (' + getIntervalLabel(interval) + ')', 'success');
+        renderSchedulerList();
+        
+        startAutoRefresh(normalizedPath);
+    })
+    .catch(function(e) {
+        document.getElementById('loading').style.display = 'none';
+        console.error('❌ Ошибка запуска:', e);
+        showToast('❌ Ошибка: ' + e.message, 'error');
+    });
+}
+
+// ============================================================
+// АВТОМАТИЧЕСКОЕ ОБНОВЛЕНИЕ ГРАФИКОВ
+// ============================================================
+
+function startAutoRefresh(path) {
+    var normalizedPath = normalizeUncPath(path);
+    console.log('🔄 Запуск автообновления для:', normalizedPath);
+    
+    if (refreshIntervals[normalizedPath]) {
+        clearInterval(refreshIntervals[normalizedPath]);
+        delete refreshIntervals[normalizedPath];
+    }
+    
+    refreshIntervals[normalizedPath] = setInterval(function() {
+        var isActive = false;
+        for (var taskId in scheduledTasks) {
+            if (scheduledTasks[taskId].path === normalizedPath && scheduledTasks[taskId].active) {
+                isActive = true;
+                break;
+            }
+        }
+        
+        if (!isActive) {
+            if (refreshIntervals[normalizedPath]) {
+                clearInterval(refreshIntervals[normalizedPath]);
+                delete refreshIntervals[normalizedPath];
+                console.log('⏹️ Автообновление остановлено для:', normalizedPath);
+            }
+            return;
+        }
+        
+        fetch('/api/scheduler/path_status', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: normalizedPath })
+        })
+        .then(function(response) { return response.json(); })
+        .then(function(data) {
+            if (data.active && data.task_id) {
+                var pathId = 'scheduler_' + normalizedPath.replace(/[\\:]/g, '_');
+                var dot = document.getElementById('schedulerDot_' + pathId);
+                var badge = document.getElementById('schedulerStatusBadge_' + pathId);
+                if (dot) dot.className = 'status-dot running';
+                if (badge) badge.innerHTML = '🟢 ' + getIntervalLabel(data.interval);
+                
+                var buttons = document.querySelectorAll('#schedulerItem_' + pathId + ' .btn-scheduler-interval');
+                buttons.forEach(function(b) { 
+                    b.classList.remove('active');
+                    if (b.textContent.trim() === getIntervalLabelShort(data.interval)) {
+                        b.classList.add('active');
+                    }
+                });
+                
+                if (data.last_scan) {
+                    var existing = findOpenPathByPath(normalizedPath);
+                    if (existing) {
+                        fetch('/api/report', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ path: normalizedPath })
+                        })
+                        .then(function(response) { return response.json(); })
+                        .then(function(reportData) {
+                            if (reportData.error) return;
+                            if (reportData.folders && reportData.folders.length > 0) {
+                                updateExistingReport(existing.pathId, reportData, 'scheduler');
+                                
+                                var chartDiv1 = document.getElementById('level1ChartDiv_' + existing.pathId);
+                                if (chartDiv1 && reportData.chart) {
+                                    renderChart(reportData.chart, 'level1ChartDiv_' + existing.pathId, existing.pathId);
+                                }
+                                
+                                var histDiv1 = document.getElementById('level1HistogramDiv_' + existing.pathId);
+                                if (histDiv1 && reportData.sectioned_histogram) {
+                                    renderSectionedHistogram(reportData.sectioned_histogram, 'level1HistogramDiv_' + existing.pathId, existing.pathId);
+                                }
+                                
+                                var statScans = document.getElementById('statScans_' + existing.pathId);
+                                if (statScans) statScans.textContent = reportData.scans_count || 0;
+                                
+                                var accordionScans = document.getElementById('accordionStatScans_' + existing.pathId);
+                                if (accordionScans) accordionScans.textContent = reportData.scans_count || 0;
+                                
+                                updateSidebar();
+                                console.log('📊 Графики обновлены для:', normalizedPath, 'сканирований:', reportData.scans_count);
+                            }
+                        })
+                        .catch(function(e) {
+                            console.error('❌ Ошибка обновления данных:', e);
+                        });
+                    } else {
+                        openReportFromScheduler(normalizedPath);
+                    }
+                }
+            }
+        })
+        .catch(function(e) {
+            console.error('❌ Ошибка проверки статуса:', e);
+        });
+    }, 3000);
+    
+    console.log('✅ Автообновление запущено для:', normalizedPath);
+}
+
+// ============================================================
+// ОСТАНОВКА ПЛАНИРОВЩИКА ДЛЯ ПУТИ
+// ============================================================
+
+function stopSchedulerForPath(path, event) {
+    if (event) event.stopPropagation();
+    
+    var normalizedPath = normalizeUncPath(path);
+    console.log('⏹️ Остановка планировщика для:', normalizedPath);
+    showToast('⏳ Остановка планировщика для: ' + normalizedPath, 'info');
+    
+    document.getElementById('loading').style.display = 'block';
+    
+    fetch('/api/scheduler/stop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: normalizedPath })
+    })
+    .then(function(response) { return response.json(); })
+    .then(function(data) {
+        document.getElementById('loading').style.display = 'none';
+        if (data.error) {
+            showToast('❌ ' + data.error, 'error');
+            return;
+        }
+        
+        for (var taskId in scheduledTasks) {
+            if (scheduledTasks[taskId].path === normalizedPath) {
+                delete scheduledTasks[taskId];
+                break;
+            }
+        }
+        
+        if (refreshIntervals[normalizedPath]) {
+            clearInterval(refreshIntervals[normalizedPath]);
+            delete refreshIntervals[normalizedPath];
+            console.log('⏹️ Автообновление остановлено для:', normalizedPath);
+        }
+        
+        var pathId = 'scheduler_' + normalizedPath.replace(/[\\:]/g, '_');
+        var buttons = document.querySelectorAll('#schedulerItem_' + pathId + ' .btn-scheduler-interval');
+        buttons.forEach(function(b) { b.classList.remove('active'); });
+        
+        showToast('⏹️ Планировщик остановлен для: ' + normalizedPath, 'warning');
+        renderSchedulerList();
+    })
+    .catch(function(e) {
+        document.getElementById('loading').style.display = 'none';
+        console.error('❌ Ошибка остановки:', e);
+        showToast('❌ Ошибка: ' + e.message, 'error');
+    });
+}
+
+// ============================================================
+// УДАЛЕНИЕ ПУТИ ИЗ ПЛАНИРОВЩИКА
+// ============================================================
+
+function removeSchedulerPath(path) {
+    var normalizedPath = normalizeUncPath(path);
+    
+    if (refreshIntervals[normalizedPath]) {
+        clearInterval(refreshIntervals[normalizedPath]);
+        delete refreshIntervals[normalizedPath];
+    }
+    
+    fetch('/api/scheduler/stop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: normalizedPath })
+    })
+    .then(function() {
+        removeSchedulerPathFromList(normalizedPath);
+        for (var taskId in scheduledTasks) {
+            if (scheduledTasks[taskId].path === normalizedPath) {
+                delete scheduledTasks[taskId];
+                break;
+            }
+        }
+        showToast('🗑️ Удален из планировщика: ' + normalizedPath, 'info');
+    })
+    .catch(function(e) {
+        console.error('Ошибка остановки:', e);
+        removeSchedulerPathFromList(normalizedPath);
+        showToast('🗑️ Удален из планировщика: ' + normalizedPath, 'info');
+    });
+}
+
+// ============================================================
+// ИНИЦИАЛИЗАЦИЯ ПЛАНИРОВЩИКА
+// ============================================================
+
+function initScheduler() {
+    console.log('🔄 Инициализация планировщика...');
+    renderSchedulerList();
+    
+    fetch('/api/scheduler/status')
+        .then(function(response) { return response.json(); })
+        .then(function(tasks) {
+            console.log('📋 Загружены задачи с сервера:', tasks);
+            tasks.forEach(function(task) {
+                if (task.active) {
+                    scheduledTasks[task.task_id] = {
+                        path: task.path,
+                        interval: task.interval,
+                        active: true
+                    };
+                    console.log('✅ Восстановлена задача:', task.task_id, task.path);
+                    
+                    setTimeout(function() {
+                        startAutoRefresh(task.path);
+                    }, 1000);
+                }
+            });
+            renderSchedulerList();
+        })
+        .catch(function(e) {
+            console.error('❌ Ошибка загрузки задач планировщика:', e);
+        });
+}
+
+// ============================================================
+// БОКОВАЯ ПАНЕЛЬ - СОДЕРЖАНИЕ
+// ============================================================
+
+function updateSidebar() {
+    var container = document.getElementById('folderTreeContainer');
+    if (!container) {
+        console.error('❌ folderTreeContainer не найден');
+        return;
+    }
+    
+    var schedulerBlock = document.getElementById('schedulerBlock');
+    container.innerHTML = '';
+    
+    if (schedulerBlock) {
+        container.appendChild(schedulerBlock);
+    }
+    
+    var totalFolders = 0;
+    var pathIds = Object.keys(multipleDataStore);
+    
+    console.log('📊 Обновление боковой панели, путей:', pathIds.length);
+    
+    var contentBlock = document.createElement('div');
+    contentBlock.className = 'content-block';
+    contentBlock.id = 'contentBlock';
+    contentBlock.innerHTML = `
+        <div class="content-block-header">
+            <span><i class="bi bi-list-ul"></i> 📂 Содержание</span>
+            <span class="badge bg-secondary" id="folderCountBadge">${pathIds.length}</span>
+        </div>
+        <div class="content-block-body" id="contentBlockBody">
+    `;
+    
+    if (pathIds.length === 0) {
+        contentBlock.innerHTML += `
+            <div class="empty-sidebar">
+                <i class="bi bi-folder" style="font-size:2rem;display:block;margin-bottom:10px;"></i>
+                Нет папок для отображения
+            </div>
+        `;
+    } else {
+        pathIds.sort();
+        
+        pathIds.forEach(function(pathId) {
+            var store = multipleDataStore[pathId];
+            if (!store) {
+                console.warn('⚠️ Store не найден для pathId:', pathId);
+                return;
+            }
+            
+            var rootPath = store.rootPath || '';
+            var currentPath = store.currentPath || rootPath;
+            var baseFolders = store.baseFolders || [];
+            var level2Folders = store.items || [];
+            var currentLevel = store.level || 0;
+            
+            console.log(`📂 Путь: ${rootPath}, уровень 1 папок: ${baseFolders.length}, уровень 2 папок: ${level2Folders.length}`);
+            
+            if (baseFolders && baseFolders.length > 0) {
+                var section1 = document.createElement('div');
+                section1.id = 'folderTreeSection_' + pathId + '_level1';
+                section1.className = 'folder-tree-section';
+                
+                var header1 = document.createElement('div');
+                header1.className = 'folder-tree-header';
+                header1.innerHTML = `
+                    <span><i class="bi bi-folder"></i> <span class="path-text" title="${rootPath}">${rootPath}</span></span>
+                    <span class="badge bg-secondary">${baseFolders.length}</span>
+                `;
+                section1.appendChild(header1);
+                
+                var treeContainer1 = document.createElement('div');
+                treeContainer1.id = 'folderTreeContainer_' + pathId + '_level1';
+                treeContainer1.className = 'folder-tree-content';
+                section1.appendChild(treeContainer1);
+                
+                var body = contentBlock.querySelector('.content-block-body');
+                if (body) {
+                    body.appendChild(section1);
+                }
+                
+                var sortedFolders1 = [...baseFolders].sort(function(a, b) {
+                    return (b.size || b.size_bytes || 0) - (a.size || a.size_bytes || 0);
+                });
+                buildFolderTreeDirect(treeContainer1, sortedFolders1, rootPath, currentPath, 0);
+                totalFolders += baseFolders.length;
+            }
+            
+            if (currentLevel > 0 && level2Folders && level2Folders.length > 0) {
+                var section2 = document.createElement('div');
+                section2.id = 'folderTreeSection_' + pathId + '_level2';
+                section2.className = 'folder-tree-section';
+                
+                var header2 = document.createElement('div');
+                header2.className = 'folder-tree-header';
+                header2.innerHTML = `
+                    <span><i class="bi bi-folder"></i> <span class="path-text" title="${currentPath}">${currentPath}</span></span>
+                    <span class="badge bg-secondary">${level2Folders.length}</span>
+                `;
+                section2.appendChild(header2);
+                
+                var treeContainer2 = document.createElement('div');
+                treeContainer2.id = 'folderTreeContainer_' + pathId + '_level2';
+                treeContainer2.className = 'folder-tree-content';
+                section2.appendChild(treeContainer2);
+                
+                var body = contentBlock.querySelector('.content-block-body');
+                if (body) {
+                    body.appendChild(section2);
+                }
+                
+                var sortedFolders2 = [...level2Folders].sort(function(a, b) {
+                    return (b.size || b.size_bytes || 0) - (a.size || a.size_bytes || 0);
+                });
+                buildFolderTreeDirect(treeContainer2, sortedFolders2, currentPath, currentPath, 1);
+                totalFolders += level2Folders.length;
+            }
+        });
+    }
+    
+    contentBlock.innerHTML += `</div>`;
+    container.appendChild(contentBlock);
+    
+    var badge = document.getElementById('folderCountBadge');
+    if (badge) badge.textContent = totalFolders;
+    
+    console.log('✅ Боковая панель обновлена, всего папок:', totalFolders);
+}
+
+// ============================================================
+// ПОСТРОЕНИЕ ДЕРЕВА ПАПОК
+// ============================================================
+
+function buildFolderTreeDirect(container, folders, rootPath, currentPath, level) {
+    if (!container) {
+        console.warn('⚠️ container не передан');
+        return;
     }
     
     if (!folders || folders.length === 0) {
@@ -601,16 +1588,20 @@ function buildFolderTree(pathId, folders, rootPath, currentPath, level) {
         var folderPath = rootPath + '\\' + f.name;
         var isActive = (folderPath === currentPath);
         var sizeStr = f.size_str || formatSize(f.size || f.size_bytes || 0);
-        var levelClass = level === 0 ? 'level1' : 'level2';
-        var levelLabel = level === 0 ? 'L1' : 'L2';
+        var levelClass = 'level' + (level + 1);
+        var levelLabel = 'L' + (level + 1);
         var iconColor = level === 0 ? '#fd7e14' : '#0d6efd';
+        var paddingLeft = level * 16 + 8;
+        
+        var escapedPath = encodeURIComponent(folderPath);
+        var pathId = getPathIdByRoot(rootPath);
         
         html += `
             <li style="padding:0;">
                 <div class="folder-item ${isActive ? 'active' : ''}" 
-                     onclick="browseFolderFromSidebar('${pathId}', '${encodeURIComponent(folderPath)}')"
+                     onclick="browseFolderFromSidebar('${pathId}', '${escapedPath}')"
                      title="${f.name}"
-                     style="display:flex;align-items:center;padding:3px 8px;border-radius:4px;cursor:pointer;transition:background 0.15s;font-size:0.82rem;gap:6px;${isActive ? 'background:#cce5ff;font-weight:600;' : ''}">
+                     style="display:flex;align-items:center;padding:3px 8px;border-radius:4px;cursor:pointer;transition:background 0.15s;font-size:0.82rem;gap:6px;${isActive ? 'background:#cce5ff;font-weight:600;' : ''} padding-left:${paddingLeft}px;">
                     <i class="bi bi-folder folder-icon" style="color:${iconColor};font-size:0.85rem;"></i>
                     <span class="folder-name" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${f.name}</span>
                     <span class="level-badge-sm ${levelClass}" style="font-size:0.55rem;padding:1px 6px;border-radius:10px;background:${level === 0 ? '#fd7e14' : '#0d6efd'};color:white;">${levelLabel}</span>
@@ -622,79 +1613,42 @@ function buildFolderTree(pathId, folders, rootPath, currentPath, level) {
     
     html += '</ul>';
     container.innerHTML = html;
-    
-    var section = document.getElementById('folderTreeSection_' + pathId);
-    if (section) {
-        var header = section.querySelector('.folder-tree-header');
-        if (header) {
-            var badge = header.querySelector('.badge');
-            if (badge) {
-                badge.textContent = folders.length;
-            }
-        }
-    }
 }
 
-function updateSidebar() {
-    var container = document.getElementById('folderTreeContainer');
-    if (!container) return;
-    
-    container.innerHTML = '';
-    
-    var totalFolders = 0;
+function getPathIdByRoot(rootPath) {
     var pathIds = Object.keys(multipleDataStore);
-    
-    if (pathIds.length === 0) {
-        container.innerHTML = `
-            <div class="empty-sidebar">
-                <i class="bi bi-folder" style="font-size:2rem;display:block;margin-bottom:10px;"></i>
-                Нет папок для отображения
-            </div>
-        `;
-        document.getElementById('folderCountBadge').textContent = '0';
+    for (var i = 0; i < pathIds.length; i++) {
+        var store = multipleDataStore[pathIds[i]];
+        if (store && store.rootPath === rootPath) {
+            return pathIds[i];
+        }
+    }
+    return null;
+}
+
+function buildFolderTree(pathId, folders, rootPath, currentPath, level) {
+    var container = document.getElementById('folderTreeContainer_' + pathId);
+    if (!container) {
+        console.warn('⚠️ folderTreeContainer_' + pathId + ' не найден');
         return;
     }
-    
-    pathIds.sort();
-    
-    pathIds.forEach(function(pathId) {
-        var store = multipleDataStore[pathId];
-        if (!store) return;
-        
-        var folders = store.baseFolders || [];
-        var rootPath = store.rootPath || '';
-        var currentPath = store.currentPath || rootPath;
-        
-        var section = document.createElement('div');
-        section.id = 'folderTreeSection_' + pathId;
-        section.className = 'folder-tree-section';
-        
-        var header = document.createElement('div');
-        header.className = 'folder-tree-header';
-        header.innerHTML = `
-            <span><i class="bi bi-folder"></i> <span class="path-text" title="${rootPath}">${rootPath}</span></span>
-            <span class="badge bg-secondary">${folders ? folders.length : 0}</span>
-        `;
-        section.appendChild(header);
-        
-        var treeContainer = document.createElement('div');
-        treeContainer.id = 'folderTreeContainer_' + pathId;
-        treeContainer.className = 'folder-tree-content';
-        section.appendChild(treeContainer);
-        
-        container.appendChild(section);
-        
-        buildFolderTree(pathId, folders, rootPath, currentPath, 0);
-        
-        totalFolders += folders ? folders.length : 0;
-    });
-    
-    document.getElementById('folderCountBadge').textContent = totalFolders;
+    buildFolderTreeDirect(container, folders, rootPath, currentPath, level);
 }
 
 function browseFolderFromSidebar(pathId, encodedPath) {
     var path = decodeURIComponent(encodedPath);
     console.log('📂 Переход из сайдбара:', pathId, path);
+    
+    var store = multipleDataStore[pathId];
+    if (!store) {
+        showToast('⚠️ Ошибка: данные не найдены', 'error');
+        return;
+    }
+    
+    if (path === store.currentPath) {
+        return;
+    }
+    
     browseFolderMultipleDB(pathId, path);
 }
 
@@ -702,7 +1656,7 @@ function browseFolderFromSidebar(pathId, encodedPath) {
 // РЕНДЕРИНГ СПИСКОВ ПАПОК
 // ============================================================
 
-function buildNavigationHTML(pathId, currentPathName, rootPath) {
+function buildNavigationHTML(pathId, currentPathName, rootPath, level) {
     var store = multipleDataStore[pathId];
     if (!store) return '';
     
@@ -722,10 +1676,10 @@ function buildNavigationHTML(pathId, currentPathName, rootPath) {
     html += '<button class="btn btn-sm btn-outline-primary" onclick="loadChartsFromDB(\'' + pathId + '\', \'' + encodeURIComponent(currentPathName) + '\')" style="font-size:0.75rem;padding:2px 8px;">';
     html += '<i class="bi bi-arrow-repeat"></i> Обновить графики</button>';
     
-    // КНОПКА ЭКСПОРТА EXCEL
     html += '<span class="nav-separator">|</span>';
-    html += '<button class="btn btn-sm btn-success" onclick="window.exportExcel(\'' + pathId + '\')" style="font-size:0.75rem;padding:2px 10px;">';
-    html += '<i class="bi bi-file-earmark-excel"></i> Excel</button>';
+    var levelText = level === 0 ? 'Уровень 1' : 'Уровень 2';
+    html += '<button class="btn btn-sm btn-success" onclick="exportExcelForPath(\'' + pathId + '\', \'' + encodeURIComponent(currentPathName) + '\')" style="font-size:0.75rem;padding:2px 10px;">';
+    html += '<i class="bi bi-file-earmark-excel"></i> Excel (' + levelText + ')</button>';
     
     if (parts.length > 1) {
         if (html) html += '<span class="nav-separator">|</span>';
@@ -760,7 +1714,7 @@ function renderFolderListLevel1(pathId, folders, basePath, currentPathName, root
     
     var navContainer = document.getElementById('navContainerLevel1_' + pathId);
     if (navContainer) {
-        navContainer.innerHTML = buildNavigationHTML(pathId, currentPathName, rootPath);
+        navContainer.innerHTML = buildNavigationHTML(pathId, currentPathName, rootPath, 0);
     }
     
     if (!folders || folders.length === 0) {
@@ -786,13 +1740,20 @@ function renderFolderListLevel1(pathId, folders, basePath, currentPathName, root
     html += '</div>';
     container.innerHTML = html;
     
-    buildFolderTree(pathId, folders, rootPath, currentPathName, 0);
     updateSidebar();
 }
 
-function renderFolderListLevel2(pathId, folders, basePath) {
+function renderFolderListLevel2(pathId, folders, basePath, currentPathName, rootPath) {
     var container = document.getElementById('itemsContainerLevel2_' + pathId);
-    if (!container) return;
+    if (!container) {
+        console.warn('⚠️ itemsContainerLevel2_' + pathId + ' не найден');
+        return;
+    }
+    
+    var navContainer = document.getElementById('navContainerLevel2_' + pathId);
+    if (navContainer) {
+        navContainer.innerHTML = buildNavigationHTML(pathId, currentPathName, rootPath, 1);
+    }
     
     if (!folders || folders.length === 0) {
         container.innerHTML = '<div class="text-center text-muted py-3"><i class="bi bi-folder" style="font-size:1.5rem;"></i><p class="mt-1" style="font-size:0.9rem;">Нет папок</p></div>';
@@ -816,6 +1777,89 @@ function renderFolderListLevel2(pathId, folders, basePath) {
 }
 
 // ============================================================
+// ПЕРЕХОД В ПАПКУ УРОВНЯ 2
+// ============================================================
+
+function browseFolderMultipleDB(pathId, path) {
+    var normalizedPath = normalizeUncPath(path);
+    var store = multipleDataStore[pathId];
+    if (!store) {
+        showToast('⚠️ Ошибка: данные не найдены', 'error');
+        return;
+    }
+    
+    var parts = normalizedPath.split('\\').filter(function(p) { return p !== ''; });
+    var rootParts = store.rootPath.split('\\').filter(function(p) { return p !== ''; });
+    if (parts.length > rootParts.length + 1) {
+        showToast('⚠️ Можно просматривать только до 2 уровня вложенности', 'warning');
+        return;
+    }
+    
+    if (!store.history) store.history = [];
+    store.history.push({
+        path: store.currentPath,
+        items: store.items,
+        level: store.level
+    });
+    
+    document.getElementById('loading').style.display = 'block';
+    
+    browseFromDB(normalizedPath)
+        .then(function(data) {
+            document.getElementById('loading').style.display = 'none';
+            if (data.error) { showToast('Ошибка: ' + data.error, 'error'); return; }
+            
+            store.currentPath = data.path;
+            store.items = data.items || [];
+            store.level = 1;
+            
+            var levelBadge = document.getElementById('levelBadge_' + pathId);
+            if (levelBadge) levelBadge.textContent = 'Уровень 2';
+            var reportTitle = document.getElementById('reportTitle_' + pathId);
+            if (reportTitle) reportTitle.textContent = data.path;
+            
+            var level2Section = document.getElementById('level2Section_' + pathId);
+            if (level2Section) {
+                level2Section.classList.add('active');
+                level2Section.style.display = 'block';
+            }
+            var level2Path = document.getElementById('level2Path_' + pathId);
+            if (level2Path) level2Path.textContent = data.path;
+            
+            if (data.chart) {
+                renderChart(data.chart, 'level2ChartDiv_' + pathId, pathId);
+            } else {
+                var chartDiv = document.getElementById('level2ChartDiv_' + pathId);
+                if (chartDiv) chartDiv.innerHTML = '';
+            }
+            
+            if (data.sectioned_histogram) {
+                renderSectionedHistogram(data.sectioned_histogram, 'level2HistogramDiv_' + pathId, pathId);
+            } else {
+                var histDiv = document.getElementById('level2HistogramDiv_' + pathId);
+                if (histDiv) histDiv.innerHTML = '';
+            }
+            
+            var navContainer = document.getElementById('navContainerLevel2_' + pathId);
+            if (navContainer) {
+                navContainer.innerHTML = buildNavigationHTML(pathId, data.path, store.rootPath, 1);
+            }
+            
+            renderFolderListLevel2(pathId, data.items || [], data.path, data.path, store.rootPath);
+            var countEl = document.getElementById('level2ItemsCount_' + pathId);
+            if (countEl) countEl.textContent = data.items ? data.items.length : 0;
+            
+            updateSidebar();
+            
+            showToast('📁 ' + normalizedPath + ' - ' + (data.items_count || 0) + ' элементов', 'info');
+        })
+        .catch(function(e) {
+            document.getElementById('loading').style.display = 'none';
+            showToast('❌ Ошибка: ' + e.message, 'error');
+        });
+}
+
+// ============================================================
 // НАВИГАЦИЯ - МНОЖЕСТВЕННЫЙ РЕЖИМ
 // ============================================================
 
@@ -834,20 +1878,29 @@ function goBackMultiple(pathId) {
     updatePathDisplay(pathId);
     
     if (store.level === 0) {
-        document.getElementById('level2Section_' + pathId).classList.remove('active');
-        document.getElementById('level2Section_' + pathId).style.display = 'none';
-        document.getElementById('levelBadge_' + pathId).textContent = 'Уровень 1';
-        document.getElementById('reportTitle_' + pathId).textContent = store.rootPath;
+        var level2Section = document.getElementById('level2Section_' + pathId);
+        if (level2Section) {
+            level2Section.classList.remove('active');
+            level2Section.style.display = 'none';
+        }
+        var levelBadge = document.getElementById('levelBadge_' + pathId);
+        if (levelBadge) levelBadge.textContent = 'Уровень 1';
+        var reportTitle = document.getElementById('reportTitle_' + pathId);
+        if (reportTitle) reportTitle.textContent = store.rootPath;
         
         renderFolderListLevel1(pathId, store.baseFolders, store.rootPath, store.rootPath, store.rootPath);
-        document.getElementById('level1ItemsCount_' + pathId).textContent = store.baseFolders ? store.baseFolders.length : 0;
+        var countEl = document.getElementById('level1ItemsCount_' + pathId);
+        if (countEl) countEl.textContent = store.baseFolders ? store.baseFolders.length : 0;
         buildFolderTree(pathId, store.baseFolders, store.rootPath, store.rootPath, 0);
         
         loadChartsFromDB(pathId, store.rootPath);
     } else {
-        renderFolderListLevel2(pathId, store.items, store.currentPath);
-        document.getElementById('level2ItemsCount_' + pathId).textContent = store.items ? store.items.length : 0;
+        renderFolderListLevel2(pathId, store.items, store.currentPath, store.currentPath, store.rootPath);
+        var countEl = document.getElementById('level2ItemsCount_' + pathId);
+        if (countEl) countEl.textContent = store.items ? store.items.length : 0;
     }
+    
+    updateSidebar();
     
     showToast('⬅️ Возврат в ' + prev.path, 'info');
 }
@@ -864,16 +1917,23 @@ function goHomeMultiple(pathId) {
     store.history = [];
     store.level = 0;
     store.currentPath = store.rootPath;
-    store.items = store.baseFolders;
+    store.items = [];
     
-    document.getElementById('level2Section_' + pathId).classList.remove('active');
-    document.getElementById('level2Section_' + pathId).style.display = 'none';
-    document.getElementById('levelBadge_' + pathId).textContent = 'Уровень 1';
-    document.getElementById('reportTitle_' + pathId).textContent = store.rootPath;
+    var level2Section = document.getElementById('level2Section_' + pathId);
+    if (level2Section) {
+        level2Section.classList.remove('active');
+        level2Section.style.display = 'none';
+    }
+    var levelBadge = document.getElementById('levelBadge_' + pathId);
+    if (levelBadge) levelBadge.textContent = 'Уровень 1';
+    var reportTitle = document.getElementById('reportTitle_' + pathId);
+    if (reportTitle) reportTitle.textContent = store.rootPath;
     
     renderFolderListLevel1(pathId, store.baseFolders, store.rootPath, store.rootPath, store.rootPath);
-    document.getElementById('level1ItemsCount_' + pathId).textContent = store.baseFolders ? store.baseFolders.length : 0;
-    buildFolderTree(pathId, store.baseFolders, store.rootPath, store.rootPath, 0);
+    var countEl = document.getElementById('level1ItemsCount_' + pathId);
+    if (countEl) countEl.textContent = store.baseFolders ? store.baseFolders.length : 0;
+    
+    updateSidebar();
     
     loadChartsFromDB(pathId, store.rootPath);
     
@@ -907,18 +1967,25 @@ function navigateMultiplePathDB(pathId, path) {
         updatePathDisplay(pathId);
         
         if (store.level === 0) {
-            document.getElementById('level2Section_' + pathId).classList.remove('active');
-            document.getElementById('level2Section_' + pathId).style.display = 'none';
-            document.getElementById('levelBadge_' + pathId).textContent = 'Уровень 1';
-            document.getElementById('reportTitle_' + pathId).textContent = store.rootPath;
+            var level2Section = document.getElementById('level2Section_' + pathId);
+            if (level2Section) {
+                level2Section.classList.remove('active');
+                level2Section.style.display = 'none';
+            }
+            var levelBadge = document.getElementById('levelBadge_' + pathId);
+            if (levelBadge) levelBadge.textContent = 'Уровень 1';
+            var reportTitle = document.getElementById('reportTitle_' + pathId);
+            if (reportTitle) reportTitle.textContent = store.rootPath;
             renderFolderListLevel1(pathId, store.baseFolders, store.rootPath, store.rootPath, store.rootPath);
             buildFolderTree(pathId, store.baseFolders, store.rootPath, store.rootPath, 0);
             loadChartsFromDB(pathId, store.rootPath);
         } else {
-            renderFolderListLevel2(pathId, store.items, store.currentPath);
-            document.getElementById('level2ItemsCount_' + pathId).textContent = store.items ? store.items.length : 0;
+            renderFolderListLevel2(pathId, store.items, store.currentPath, store.currentPath, store.rootPath);
+            var countEl = document.getElementById('level2ItemsCount_' + pathId);
+            if (countEl) countEl.textContent = store.items ? store.items.length : 0;
         }
         
+        updateSidebar();
         showToast('⬅️ Переход в ' + saved.path, 'info');
         return;
     }
@@ -945,8 +2012,9 @@ function navigateMultiplePathDB(pathId, path) {
                 renderSectionedHistogram(data.sectioned_histogram, 'level2HistogramDiv_' + pathId, pathId);
             }
             
-            renderFolderListLevel2(pathId, data.items || [], data.path);
-            document.getElementById('level2ItemsCount_' + pathId).textContent = data.items ? data.items.length : 0;
+            renderFolderListLevel2(pathId, data.items || [], data.path, data.path, store.rootPath);
+            var countEl = document.getElementById('level2ItemsCount_' + pathId);
+            if (countEl) countEl.textContent = data.items ? data.items.length : 0;
             
             if (data.items && data.items.length > 0) {
                 var container = document.getElementById('folderTreeContainer_' + pathId);
@@ -978,128 +2046,8 @@ function navigateMultiplePathDB(pathId, path) {
                 }
             }
             
+            updateSidebar();
             showToast('📂 Переход в ' + normalizedPath, 'info');
-        })
-        .catch(function(e) {
-            document.getElementById('loading').style.display = 'none';
-            showToast('❌ Ошибка: ' + e.message, 'error');
-        });
-}
-
-function browseFolderMultipleDB(pathId, path) {
-    var normalizedPath = normalizeUncPath(path);
-    var store = multipleDataStore[pathId];
-    if (!store) {
-        showToast('⚠️ Ошибка: данные не найдены', 'error');
-        return;
-    }
-    
-    var parts = normalizedPath.split('\\').filter(function(p) { return p !== ''; });
-    var rootParts = store.rootPath.split('\\').filter(function(p) { return p !== ''; });
-    if (parts.length > rootParts.length + 1) {
-        showToast('⚠️ Можно просматривать только до 2 уровня вложенности', 'warning');
-        return;
-    }
-    
-    if (!store.history) store.history = [];
-    store.history.push({
-        path: store.currentPath,
-        items: store.items,
-        level: store.level
-    });
-    
-    document.getElementById('loading').style.display = 'block';
-    
-    browseFromDB(normalizedPath)
-        .then(function(data) {
-            document.getElementById('loading').style.display = 'none';
-            if (data.error) { showToast('Ошибка: ' + data.error, 'error'); return; }
-            
-            store.currentPath = data.path;
-            store.items = data.items || [];
-            store.level = store.history.length;
-            
-            document.getElementById('levelBadge_' + pathId).textContent = 'Уровень 2';
-            document.getElementById('reportTitle_' + pathId).textContent = data.path;
-            
-            document.getElementById('level2Section_' + pathId).classList.add('active');
-            document.getElementById('level2Section_' + pathId).style.display = 'block';
-            document.getElementById('level2Path_' + pathId).textContent = data.path;
-            
-            if (data.chart) {
-                renderChart(data.chart, 'level2ChartDiv_' + pathId, pathId);
-            } else {
-                document.getElementById('level2ChartDiv_' + pathId).innerHTML = `
-                    <div class="text-center text-muted py-3">
-                        <i class="bi bi-bar-chart" style="font-size:2rem;display:block;margin-bottom:6px;"></i>
-                        <p style="font-size:0.9rem;">Нет данных для графика</p>
-                        <small>Нужно минимум 2 сканирования</small>
-                    </div>
-                `;
-            }
-            
-            if (data.sectioned_histogram) {
-                renderSectionedHistogram(data.sectioned_histogram, 'level2HistogramDiv_' + pathId, pathId);
-            } else {
-                document.getElementById('level2HistogramDiv_' + pathId).innerHTML = `
-                    <div class="text-center text-muted py-3">
-                        <i class="bi bi-bar-chart" style="font-size:2rem;display:block;margin-bottom:6px;"></i>
-                        <p style="font-size:0.9rem;">Нет данных для гистограммы</p>
-                        <small>Нужно минимум 2 сканирования</small>
-                    </div>
-                `;
-            }
-            
-            renderFolderListLevel2(pathId, data.items || [], data.path);
-            document.getElementById('level2ItemsCount_' + pathId).textContent = data.items ? data.items.length : 0;
-            
-            if (data.items && data.items.length > 0) {
-                var container = document.getElementById('folderTreeContainer_' + pathId);
-                if (container) {
-                    var html = '<ul class="folder-tree" style="list-style:none;padding:0;margin:0;">';
-                    html += `
-                        <li style="padding:0;">
-                            <div class="folder-item" onclick="goHomeMultiple('${pathId}')" style="display:flex;align-items:center;padding:3px 8px;border-radius:4px;cursor:pointer;color:#007bff;font-weight:500;font-size:0.82rem;">
-                                <i class="bi bi-arrow-up-circle" style="color:#007bff;margin-right:6px;"></i>
-                                <span class="folder-name">.. (На уровень выше)</span>
-                            </div>
-                        </li>
-                    `;
-                    data.items.forEach(function(f) {
-                        var sizeStr = f.size_str || formatSize(f.size || 0);
-                        html += `
-                            <li style="padding:0;">
-                                <div class="folder-item" style="display:flex;align-items:center;padding:3px 8px;border-radius:4px;font-size:0.82rem;gap:6px;padding-left:20px;">
-                                    <i class="bi bi-folder folder-icon" style="color:#0d6efd;font-size:0.85rem;"></i>
-                                    <span class="folder-name" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${f.name}</span>
-                                    <span class="level-badge-sm level2" style="font-size:0.55rem;padding:1px 6px;border-radius:10px;background:#0d6efd;color:white;">L2</span>
-                                    <span class="folder-size" style="font-size:0.65rem;color:#6c757d;background:#f1f3f5;padding:1px 6px;border-radius:10px;">${sizeStr}</span>
-                                </div>
-                            </li>
-                        `;
-                    });
-                    html += '</ul>';
-                    container.innerHTML = html;
-                }
-            } else {
-                var container = document.getElementById('folderTreeContainer_' + pathId);
-                if (container) {
-                    container.innerHTML = `
-                        <div class="empty-sidebar" style="padding:8px;font-size:0.8rem;color:#6c757d;">
-                            <i class="bi bi-folder" style="font-size:1.2rem;display:block;margin-bottom:4px;"></i>
-                            Внутренних папок нет
-                            <br>
-                            <button class="btn btn-sm btn-primary mt-2" onclick="goHomeMultiple('${pathId}')">
-                                <i class="bi bi-arrow-up"></i> На уровень выше
-                            </button>
-                        </div>
-                    `;
-                }
-            }
-            
-            renderFolderListLevel1(pathId, store.baseFolders, store.rootPath, store.rootPath, store.rootPath);
-            
-            showToast('📁 ' + normalizedPath + ' - ' + (data.items_count || 0) + ' элементов', 'info');
         })
         .catch(function(e) {
             document.getElementById('loading').style.display = 'none';
@@ -1112,39 +2060,104 @@ function updatePathDisplay(pathId) {
     if (!store) return;
     
     var levelBadge = document.getElementById('levelBadge_' + pathId);
-    var reportTitle = document.getElementById('reportTitle_' + pathId);
-    var statItems = document.getElementById('statItems_' + pathId);
-    var statSize = document.getElementById('statSize_' + pathId);
-    var statScans = document.getElementById('statScans_' + pathId);
-    
     if (levelBadge) levelBadge.textContent = store.level === 0 ? 'Уровень 1' : 'Уровень 2';
+    
+    var reportTitle = document.getElementById('reportTitle_' + pathId);
     if (reportTitle) reportTitle.textContent = store.currentPath;
+    
+    var statItems = document.getElementById('statItems_' + pathId);
     if (statItems) statItems.textContent = store.items ? store.items.length : 0;
+    
+    var statSize = document.getElementById('statSize_' + pathId);
     if (statSize) statSize.textContent = store.totalSizeStr || '0';
+    
+    var statScans = document.getElementById('statScans_' + pathId);
     if (statScans) statScans.textContent = store.scansCount || 0;
     
     var navContainer = document.getElementById('navContainerLevel1_' + pathId);
     if (navContainer) {
-        navContainer.innerHTML = buildNavigationHTML(pathId, store.currentPath, store.rootPath);
+        navContainer.innerHTML = buildNavigationHTML(pathId, store.currentPath, store.rootPath, store.level);
     }
+    
+    updateAccordionHeader(pathId);
 }
 
 // ============================================================
-// ОСНОВНАЯ ФУНКЦИЯ ОТОБРАЖЕНИЯ ОТЧЕТОВ
+// АККОРДЕОН - УПРАВЛЕНИЕ
 // ============================================================
 
-function showMultipleReports(results) {
+function toggleAccordion(pathId) {
+    var body = document.getElementById('accordionBody_' + pathId);
+    var toggle = document.getElementById('accordionToggle_' + pathId);
+    
+    if (!body || !toggle) return;
+    
+    if (body.classList.contains('show')) {
+        body.classList.remove('show');
+        toggle.classList.add('collapsed');
+    } else {
+        body.classList.add('show');
+        toggle.classList.remove('collapsed');
+    }
+}
+
+function updateAccordionHeader(pathId) {
+    var store = multipleDataStore[pathId];
+    if (!store) return;
+    
+    var pathNameEl = document.getElementById('accordionPathName_' + pathId);
+    var statFoldersEl = document.getElementById('accordionStatFolders_' + pathId);
+    var statSizeEl = document.getElementById('accordionStatSize_' + pathId);
+    var statScansEl = document.getElementById('accordionStatScans_' + pathId);
+    
+    if (pathNameEl) pathNameEl.textContent = store.rootPath;
+    if (statFoldersEl) statFoldersEl.textContent = store.baseFolders ? store.baseFolders.length : 0;
+    if (statSizeEl) statSizeEl.textContent = store.totalSizeStr || '0';
+    if (statScansEl) statScansEl.textContent = store.scansCount || 0;
+}
+
+// ============================================================
+// ОСНОВНАЯ ФУНКЦИЯ ОТОБРАЖЕНИЯ ОТЧЕТОВ (АККОРДЕОН)
+// ============================================================
+
+function showMultipleReports(results, sourceType) {
     var container = document.getElementById('mainContent');
+    sourceType = sourceType || 'scan';
     
-    document.getElementById('reportSection').style.display = 'block';
-    container.innerHTML = '';
+    var uniqueResults = [];
+    var seenPaths = [];
     
-    results.forEach(function(data, index) {
-        var pathId = 'path_' + (index + 1);
+    results.forEach(function(data) {
+        if (!seenPaths.includes(data.path)) {
+            seenPaths.push(data.path);
+            uniqueResults.push(data);
+        }
+    });
+    
+    if (uniqueResults.length < results.length) {
+        showToast('⚠️ Удалены дубликаты путей', 'warning');
+    }
+    
+    var reportSection = document.getElementById('reportSection');
+    if (reportSection) reportSection.style.display = 'block';
+    
+    uniqueResults.sort(function(a, b) {
+        return a.path.localeCompare(b.path);
+    });
+    
+    uniqueResults.forEach(function(data) {
+        var path = data.path;
+        
+        var existing = findOpenPathByPath(path);
+        if (existing) {
+            updateExistingReport(existing.pathId, data, sourceType);
+            return;
+        }
+        
+        var pathId = 'path_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
         var level = data.level || 1;
         
-        console.log('📊 showMultipleReports для pathId:', pathId);
-        console.log('📊 sectioned_histogram:', data.sectioned_histogram ? 'есть' : 'нет');
+        console.log('📊 Создание нового отчета для pathId:', pathId);
         
         multipleDataStore[pathId] = {
             rootPath: data.path,
@@ -1160,131 +2173,230 @@ function showMultipleReports(results) {
             folderHistory: data.folder_history || []
         };
         
-        var cardHtml = `
-            <div class="card report-card" id="report-card-${pathId}">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <span><i class="bi bi-folder"></i> <strong id="reportTitle_${pathId}">${data.path}</strong></span>
-                    <div>
-                        <span class="badge bg-secondary level-badge" id="levelBadge_${pathId}">Уровень ${level}</span>
-                        <button class="btn btn-sm btn-success ms-2" onclick="window.exportExcel('${pathId}')" style="font-size:0.7rem;padding:2px 10px;">
-                            <i class="bi bi-file-earmark-excel"></i> Excel
-                        </button>
-                        <button class="btn btn-sm btn-danger ms-2" onclick="closeReport()"><i class="bi bi-x-lg"></i></button>
+        addOpenPath(pathId, data.path, sourceType);
+        
+        var cardHtml = createAccordionHTML(pathId, data, level, sourceType);
+        if (container) container.innerHTML += cardHtml;
+        
+        var body = document.getElementById('accordionBody_' + pathId);
+        var toggle = document.getElementById('accordionToggle_' + pathId);
+        if (body) body.classList.add('show');
+        if (toggle) toggle.classList.remove('collapsed');
+        
+        updateAccordionHeader(pathId);
+        
+        renderFolderListLevel1(pathId, data.folders || [], data.path, data.path, data.path);
+        
+        setTimeout(function() {
+            loadChartsFromDB(pathId, data.path);
+        }, 300);
+    });
+    
+    setTimeout(function() {
+        updateSidebar();
+    }, 100);
+    
+    showToast('✅ Загружено ' + uniqueResults.length + ' отчетов', 'success');
+}
+
+function createAccordionHTML(pathId, data, level, sourceType) {
+    var encodedPath = encodeURIComponent(data.path);
+    var badgeClass = sourceType === 'scan' ? 'scan' : (sourceType === 'scheduler' ? 'scheduler' : 'db');
+    var badgeText = sourceType === 'scan' ? 'Скан' : (sourceType === 'scheduler' ? 'План' : 'БД');
+    
+    return `
+        <div class="accordion-report" id="accordion-${pathId}">
+            <div class="accordion-header" onclick="toggleAccordion('${pathId}')">
+                <div class="header-left">
+                    <span class="path-badge ${badgeClass}">${badgeText}</span>
+                    <span class="path-name" id="accordionPathName_${pathId}" title="${data.path}">${data.path}</span>
+                    <div class="stat-info">
+                        <span><i class="bi bi-folder"></i> <span id="accordionStatFolders_${pathId}">${data.folders ? data.folders.length : 0}</span></span>
+                        <span><i class="bi bi-hdd"></i> <span id="accordionStatSize_${pathId}">${data.total_size_str || '0'}</span></span>
+                        <span><i class="bi bi-clock-history"></i> <span id="accordionStatScans_${pathId}">${data.scans_count || 0}</span></span>
                     </div>
                 </div>
-                <div class="card-body">
-                    <div class="stat-row">
-                        <div class="stat-item"><div class="value" id="statItems_${pathId}">${data.folders ? data.folders.length : 0}</div><div class="label">Папок</div></div>
-                        <div class="stat-item"><div class="value" id="statSize_${pathId}">${data.total_size_str || '0'}</div><div class="label">Размер</div></div>
-                        <div class="stat-item"><div class="value" id="statScans_${pathId}">${data.scans_count || 0}</div><div class="label">Сканирований</div></div>
-                        <div class="stat-item"><div class="value" style="font-size:0.7rem;">${new Date().toLocaleString()}</div><div class="label">Последнее</div></div>
-                    </div>
+                <div class="header-right">
+                    <button class="btn btn-sm btn-success" onclick="event.stopPropagation(); exportExcelForPath('${pathId}', '${encodedPath}')" style="font-size:0.7rem;padding:2px 10px;">
+                        <i class="bi bi-file-earmark-excel"></i> Excel
+                    </button>
+                    <button class="btn btn-sm btn-danger" onclick="event.stopPropagation(); removeOpenPath('${pathId}')" title="Закрыть каталог" style="font-size:0.7rem;padding:2px 10px;">
+                        <i class="bi bi-x-lg"></i>
+                    </button>
+                    <span class="accordion-toggle" id="accordionToggle_${pathId}">
+                        <i class="bi bi-chevron-down"></i>
+                    </span>
+                </div>
+            </div>
+            <div class="accordion-body" id="accordionBody_${pathId}">
+                <div class="stat-row">
+                    <div class="stat-item"><div class="value" id="statItems_${pathId}">${data.folders ? data.folders.length : 0}</div><div class="label">Папок</div></div>
+                    <div class="stat-item"><div class="value" id="statSize_${pathId}">${data.total_size_str || '0'}</div><div class="label">Размер</div></div>
+                    <div class="stat-item"><div class="value" id="statScans_${pathId}">${data.scans_count || 0}</div><div class="label">Сканирований</div></div>
+                    <div class="stat-item"><div class="value" style="font-size:0.7rem;">${new Date().toLocaleString()}</div><div class="label">Последнее</div></div>
+                </div>
 
-                    <div class="chart-section level-1">
+                <div class="chart-section level-1">
+                    <div class="section-title">
+                        <i class="bi bi-arrow-up-circle"></i>
+                        📌 УРОВЕНЬ 1 - СКАНИРУЕМЫЙ КАТАЛОГ
+                        <span class="badge">Уровень 1</span>
+                        <span class="path-text">${data.path}</span>
+                        <button class="btn btn-sm btn-success ms-auto" onclick="exportExcelForPath('${pathId}', '${encodedPath}')" style="font-size:0.7rem;padding:2px 10px;">
+                            <i class="bi bi-file-earmark-excel"></i> Excel (L1)
+                        </button>
+                    </div>
+                    <div class="chart-card">
+                        <h6><i class="bi bi-graph-up"></i> График динамики</h6>
+                        <div class="chart-wrapper">
+                            <div id="level1ChartDiv_${pathId}"></div>
+                        </div>
+                    </div>
+                    <div class="chart-card">
+                        <h6><i class="bi bi-layers"></i> Гистограмма по папкам</h6>
+                        <div class="histogram-wrapper-scroll">
+                            <div id="level1HistogramDiv_${pathId}"></div>
+                        </div>
+                        <small class="text-muted">Каждая подгистограмма - одна папка, столбцы внутри - сканирования (ВПРИТЫК)</small>
+                    </div>
+                </div>
+
+                <div class="folders-section" id="foldersSectionLevel1_${pathId}">
+                    <div class="folders-header">
+                        <h6><i class="bi bi-folder2-open"></i> Содержимое (Уровень 1) - <span id="level1ItemsCount_${pathId}">${data.folders ? data.folders.length : 0}</span> папок</h6>
+                        <div class="folders-nav" id="navContainerLevel1_${pathId}"></div>
+                    </div>
+                    <div id="itemsContainerLevel1_${pathId}" class="list-group"></div>
+                </div>
+
+                <div class="level-2-section" id="level2Section_${pathId}">
+                    <hr class="level-divider">
+                    <div class="chart-section level-2">
                         <div class="section-title">
-                            <i class="bi bi-arrow-up-circle"></i>
-                            📌 УРОВЕНЬ 1 - СКАНИРУЕМЫЙ КАТАЛОГ
-                            <span class="badge">Уровень 1</span>
-                            <span class="path-text">${data.path}</span>
-                            <button class="btn btn-sm btn-success ms-auto" onclick="window.exportExcel('${pathId}')" style="font-size:0.7rem;padding:2px 10px;">
-                                <i class="bi bi-file-earmark-excel"></i> Excel
+                            <i class="bi bi-folder"></i>
+                            📌 УРОВЕНЬ 2 - ОТКРЫТЫЙ КАТАЛОГ
+                            <span class="badge">Уровень 2</span>
+                            <span class="path-text" id="level2Path_${pathId}">${data.path}</span>
+                            <button class="btn btn-sm btn-success ms-auto" onclick="exportExcelForPath('${pathId}', document.getElementById('level2Path_${pathId}').textContent)" style="font-size:0.7rem;padding:2px 10px;">
+                                <i class="bi bi-file-earmark-excel"></i> Excel (L2)
                             </button>
                         </div>
                         <div class="chart-card">
                             <h6><i class="bi bi-graph-up"></i> График динамики</h6>
                             <div class="chart-wrapper">
-                                <div id="level1ChartDiv_${pathId}">
-                                    <div class="text-center text-muted py-3">
-                                        <i class="bi bi-hourglass-split" style="font-size:2rem;display:block;margin-bottom:6px;"></i>
-                                        <p style="font-size:0.9rem;">Загрузка графика...</p>
-                                    </div>
-                                </div>
+                                <div id="level2ChartDiv_${pathId}"></div>
                             </div>
                         </div>
                         <div class="chart-card">
-                            <h6><i class="bi bi-layers"></i> Секционированная гистограмма</h6>
-                            <div class="chart-wrapper">
-                                <div id="level1HistogramDiv_${pathId}">
-                                    <div class="text-center text-muted py-3">
-                                        <i class="bi bi-bar-chart" style="font-size:2rem;display:block;margin-bottom:6px;"></i>
-                                        <p style="font-size:0.9rem;">Загрузка секционированной гистограммы...</p>
-                                    </div>
-                                </div>
+                            <h6><i class="bi bi-layers"></i> Гистограмма по папкам</h6>
+                            <div class="histogram-wrapper-scroll">
+                                <div id="level2HistogramDiv_${pathId}"></div>
                             </div>
-                            <small class="text-muted">Каждая секция показывает историю изменения размера одной папки</small>
+                            <small class="text-muted">Каждая подгистограмма - одна папка, столбцы внутри - сканирования (ВПРИТЫК)</small>
                         </div>
                     </div>
 
-                    <div class="folders-section" id="foldersSectionLevel1_${pathId}">
+                    <div class="folders-section level-2">
                         <div class="folders-header">
-                            <h6><i class="bi bi-folder2-open"></i> Содержимое (Уровень 1) - <span id="level1ItemsCount_${pathId}">${data.folders ? data.folders.length : 0}</span> папок</h6>
-                            <div class="folders-nav" id="navContainerLevel1_${pathId}"></div>
+                            <h6><i class="bi bi-folder2-open"></i> Содержимое (Уровень 2) - <span id="level2ItemsCount_${pathId}">0</span> папок</h6>
+                            <div class="folders-nav" id="navContainerLevel2_${pathId}"></div>
                         </div>
-                        <div id="itemsContainerLevel1_${pathId}" class="list-group"></div>
-                    </div>
-
-                    <div class="level-2-section" id="level2Section_${pathId}">
-                        <hr class="level-divider">
-                        <div class="chart-section level-2">
-                            <div class="section-title">
-                                <i class="bi bi-folder"></i>
-                                📌 УРОВЕНЬ 2 - ОТКРЫТЫЙ КАТАЛОГ
-                                <span class="badge">Уровень 2</span>
-                                <span class="path-text" id="level2Path_${pathId}">${data.path}</span>
-                            </div>
-                            <div class="chart-card">
-                                <h6><i class="bi bi-graph-up"></i> График динамики</h6>
-                                <div class="chart-wrapper">
-                                    <div id="level2ChartDiv_${pathId}">
-                                        <div class="text-center text-muted py-3">
-                                            <i class="bi bi-bar-chart" style="font-size:2rem;display:block;margin-bottom:6px;"></i>
-                                            <p style="font-size:0.9rem;">Нет данных</p>
-                                            <small>Откройте папку уровня 2</small>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="chart-card">
-                                <h6><i class="bi bi-layers"></i> Секционированная гистограмма</h6>
-                                <div class="chart-wrapper">
-                                    <div id="level2HistogramDiv_${pathId}">
-                                        <div class="text-center text-muted py-3">
-                                            <i class="bi bi-bar-chart" style="font-size:2rem;display:block;margin-bottom:6px;"></i>
-                                            <p style="font-size:0.9rem;">Нет данных</p>
-                                            <small>Откройте папку уровня 2</small>
-                                        </div>
-                                    </div>
-                                </div>
-                                <small class="text-muted">Каждая секция показывает историю изменения размера одной папки</small>
-                            </div>
-                        </div>
-
-                        <div class="folders-section level-2">
-                            <div class="folders-header">
-                                <h6><i class="bi bi-folder2-open"></i> Содержимое (Уровень 2) - <span id="level2ItemsCount_${pathId}">0</span> папок</h6>
-                            </div>
-                            <div id="itemsContainerLevel2_${pathId}" class="list-group"></div>
-                        </div>
+                        <div id="itemsContainerLevel2_${pathId}" class="list-group"></div>
                     </div>
                 </div>
             </div>
-        `;
+        </div>
+    `;
+}
+
+function updateExistingReport(pathId, data, sourceType) {
+    console.log('🔄 Обновление существующего отчета для pathId:', pathId);
+    
+    var store = multipleDataStore[pathId];
+    if (!store) {
+        console.error('❌ Store не найден для pathId:', pathId);
+        return;
+    }
+    
+    store.rootPath = data.path;
+    store.currentPath = data.path;
+    store.items = data.folders || [];
+    store.baseFolders = data.folders || [];
+    store.scansCount = data.scans_count || 0;
+    store.totalSizeStr = data.total_size_str || '0';
+    store.chart = data.chart;
+    store.sectionedHistogram = data.sectioned_histogram || null;
+    store.folderHistory = data.folder_history || [];
+    store.level = 0;
+    
+    updateAccordionHeader(pathId);
+    
+    var itemsEl = document.getElementById('statItems_' + pathId);
+    if (itemsEl) itemsEl.textContent = data.folders ? data.folders.length : 0;
+    
+    var sizeEl = document.getElementById('statSize_' + pathId);
+    if (sizeEl) sizeEl.textContent = data.total_size_str || '0';
+    
+    var scansEl = document.getElementById('statScans_' + pathId);
+    if (scansEl) scansEl.textContent = data.scans_count || 0;
+    
+    var titleEl = document.getElementById('reportTitle_' + pathId);
+    if (titleEl) titleEl.textContent = data.path;
+    
+    var pathNameEl = document.getElementById('accordionPathName_' + pathId);
+    if (pathNameEl) pathNameEl.textContent = data.path;
+    
+    var level2Section = document.getElementById('level2Section_' + pathId);
+    if (level2Section) {
+        level2Section.classList.remove('active');
+        level2Section.style.display = 'none';
+    }
+    
+    renderFolderListLevel1(pathId, data.folders || [], data.path, data.path, data.path);
+    
+    buildFolderTree(pathId, data.folders || [], data.path, data.path, 0);
+    
+    var openItem = findOpenPathById(pathId);
+    if (openItem) {
+        openItem.type = sourceType || 'scheduler';
+        updateOpenPathsList();
+    }
+    
+    setTimeout(function() {
+        var chartDiv1 = document.getElementById('level1ChartDiv_' + pathId);
+        if (chartDiv1) {
+            if (data.chart) {
+                renderChart(data.chart, 'level1ChartDiv_' + pathId, pathId);
+            } else {
+                chartDiv1.innerHTML = `
+                    <div class="text-center text-muted py-3">
+                        <i class="bi bi-bar-chart" style="font-size:2rem;display:block;margin-bottom:6px;"></i>
+                        <p style="font-size:0.9rem;">Нет данных для графика</p>
+                        <small>Нужно минимум 2 сканирования</small>
+                    </div>
+                `;
+            }
+        }
         
-        container.innerHTML += cardHtml;
+        var histDiv1 = document.getElementById('level1HistogramDiv_' + pathId);
+        if (histDiv1) {
+            if (data.sectioned_histogram) {
+                renderSectionedHistogram(data.sectioned_histogram, 'level1HistogramDiv_' + pathId, pathId);
+            } else {
+                histDiv1.innerHTML = `
+                    <div class="text-center text-muted py-3">
+                        <i class="bi bi-bar-chart" style="font-size:2rem;display:block;margin-bottom:6px;"></i>
+                        <p style="font-size:0.9rem;">Нет данных для гистограммы</p>
+                        <small>Нужно минимум 2 сканирования</small>
+                    </div>
+                `;
+            }
+        }
         
-        renderFolderListLevel1(pathId, data.folders || [], data.path, data.path, data.path);
-    });
+        updateSidebar();
+    }, 300);
     
-    updateSidebar();
-    
-    results.forEach(function(data, index) {
-        var pathId = 'path_' + (index + 1);
-        setTimeout(function() {
-            loadChartsFromDB(pathId, data.path);
-        }, 500 + index * 200);
-    });
-    
-    showToast('✅ Загружено ' + results.length + ' отчетов', 'success');
+    showToast('🔄 Отчет обновлен для: ' + data.path, 'info');
 }
 
 // ============================================================
@@ -1293,6 +2405,20 @@ function showMultipleReports(results) {
 
 function openReport(path) {
     var normalizedPath = normalizeUncPath(path);
+    
+    var existing = findOpenPathByPath(normalizedPath);
+    if (existing) {
+        showToast('ℹ️ Каталог уже открыт: ' + normalizedPath, 'info');
+        var accordion = document.getElementById('accordion-' + existing.pathId);
+        if (accordion) {
+            accordion.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            var body = document.getElementById('accordionBody_' + existing.pathId);
+            var toggle = document.getElementById('accordionToggle_' + existing.pathId);
+            if (body) body.classList.add('show');
+            if (toggle) toggle.classList.remove('collapsed');
+        }
+        return;
+    }
     
     document.getElementById('loading').style.display = 'block';
     fetch('/api/report', {
@@ -1304,26 +2430,12 @@ function openReport(path) {
     .then(function(data) {
         document.getElementById('loading').style.display = 'none';
         if (data.error) { showToast('Ошибка: ' + data.error, 'error'); return; }
-        showMultipleReports([data]);
+        showMultipleReports([data], 'history');
     })
     .catch(function(e) {
         document.getElementById('loading').style.display = 'none';
         showToast('❌ Ошибка: ' + e.message, 'error');
     });
-}
-
-function closeReport() {
-    document.getElementById('reportSection').style.display = 'none';
-    document.getElementById('mainContent').innerHTML = '';
-    document.getElementById('folderTreeContainer').innerHTML = `
-        <div class="empty-sidebar">
-            <i class="bi bi-folder" style="font-size:2rem;display:block;margin-bottom:10px;"></i>
-            Нет папок для отображения
-        </div>
-    `;
-    document.getElementById('folderCountBadge').textContent = '0';
-    multipleDataStore = {};
-    currentPathId = null;
 }
 
 // ============================================================
@@ -1340,21 +2452,15 @@ function closeReport() {
         var flash = document.createElement('div');
         flash.className = 'flash-overlay';
         document.body.appendChild(flash);
-        setTimeout(function() {
-            if (flash.parentElement) flash.remove();
-        }, 400);
+        setTimeout(function() { if (flash.parentElement) flash.remove(); }, 400);
         
         var shockwave = document.createElement('div');
         shockwave.className = 'shockwave';
         document.body.appendChild(shockwave);
-        setTimeout(function() {
-            if (shockwave.parentElement) shockwave.remove();
-        }, 1200);
+        setTimeout(function() { if (shockwave.parentElement) shockwave.remove(); }, 1200);
         
         document.body.classList.add('shake');
-        setTimeout(function() {
-            document.body.classList.remove('shake');
-        }, 900);
+        setTimeout(function() { document.body.classList.remove('shake'); }, 900);
         
         var text = document.createElement('div');
         text.className = 'explosion-text';
@@ -1438,9 +2544,7 @@ function closeReport() {
                 box-shadow: 0 0 15px ${color};
             `;
             document.body.appendChild(spark);
-            setTimeout(function(el) {
-                if (el && el.parentElement) el.remove();
-            }, 1500, spark);
+            setTimeout(function(el) { if (el && el.parentElement) el.remove(); }, 1500, spark);
         }
         
         var fireColors = ['#ff4500', '#ff6b00', '#ff8c00', '#ffa500', '#ffd700'];
@@ -1493,9 +2597,7 @@ function closeReport() {
                 box-shadow: 0 2px 5px rgba(0,0,0,0.1);
             `;
             document.body.appendChild(confetti);
-            setTimeout(function(el) {
-                if (el && el.parentElement) el.remove();
-            }, 4500, confetti);
+            setTimeout(function(el) { if (el && el.parentElement) el.remove(); }, 4500, confetti);
         }
         
         setTimeout(function() {
@@ -1523,9 +2625,11 @@ document.getElementById('scanForm').addEventListener('submit', function(e) {
     
     var btn = document.getElementById('scanBtn');
     var progress = document.getElementById('scanProgress');
-    btn.disabled = true;
-    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Сканирование...';
-    progress.style.display = 'block';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Сканирование...';
+    }
+    if (progress) progress.style.display = 'block';
 
     var reportSection = document.getElementById('reportSection');
     if (reportSection) {
@@ -1557,15 +2661,54 @@ document.getElementById('scanForm').addEventListener('submit', function(e) {
             
             showToast('✅ Сканирование завершено! Обработано ' + valid.length + ' путей', 'success');
             loadPaths();
-            
-            showMultipleReports(valid);
+            showMultipleReports(valid, 'scan');
         })
         .finally(function() {
-            btn.disabled = false;
-            btn.innerHTML = '<i class="bi bi-play-fill"></i> Сканировать все пути';
-            progress.style.display = 'none';
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-play-fill"></i> Сканировать';
+            }
+            if (progress) progress.style.display = 'none';
         });
 });
+
+// ============================================================
+// АВТООБНОВЛЕНИЕ СТАТУСА ПЛАНИРОВЩИКА
+// ============================================================
+
+setInterval(function() {
+    var paths = getSchedulerPaths();
+    paths.forEach(function(path) {
+        fetch('/api/scheduler/path_status', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: path })
+        })
+        .then(function(response) { return response.json(); })
+        .then(function(data) {
+            var pathId = 'scheduler_' + path.replace(/[\\:]/g, '_');
+            var dot = document.getElementById('schedulerDot_' + pathId);
+            var badge = document.getElementById('schedulerStatusBadge_' + pathId);
+            var startBtn = document.getElementById('startSchedulerBtn_' + pathId);
+            var stopBtn = document.getElementById('stopSchedulerBtn_' + pathId);
+            
+            if (data.active) {
+                if (dot) dot.className = 'status-dot running';
+                if (badge) badge.innerHTML = '🟢 ' + getIntervalLabel(data.interval);
+                if (startBtn) startBtn.classList.add('hidden');
+                if (stopBtn) stopBtn.classList.remove('hidden');
+            } else {
+                if (dot) dot.className = 'status-dot stopped';
+                if (badge) badge.innerHTML = '⚪ Не активен';
+                if (startBtn) startBtn.classList.remove('hidden');
+                if (stopBtn) stopBtn.classList.add('hidden');
+            }
+        })
+        .catch(function(e) {
+            console.error('Ошибка обновления статуса', e);
+        });
+    });
+}, 30000);
 
 // ============================================================
 // ИНИЦИАЛИЗАЦИЯ
@@ -1573,14 +2716,30 @@ document.getElementById('scanForm').addEventListener('submit', function(e) {
 
 updatePathTags();
 loadPaths();
+
+setTimeout(function() {
+    initScheduler();
+}, 500);
+
 console.log('✅ Приложение загружено.');
-console.log('✅ Графики загружаются из БД при открытии отчета');
-console.log('✅ Секционированная гистограмма показывает каждую папку отдельно');
-console.log('✅ Каждая папка - свой цвет');
-console.log('✅ Легенда ГОРИЗОНТАЛЬНАЯ и находится ВВЕРХУ графика');
-console.log('✅ Клик по легенде - скрывает/показывает папку на графике');
-console.log('✅ Столбцы НЕ НАЛЕЗАЮТ друг на друга (bargap=0.6)');
-console.log('📂 Боковая панель показывает все сканированные пути с разделителями');
-console.log('📊 Во всплывающих подсказках отображаются названия папок');
-console.log('📊 ДОБАВЛЕН ЭКСПОРТ В EXCEL С ГРАФИКОМ ДИНАМИКИ');
+console.log('✅ Добавлены выпадающие вкладки (аккордеон) для каждого пути');
+console.log('✅ Исправлена работа уровня 2');
+console.log('✅ Добавлены проверки на существование элементов');
+console.log('⏰ Добавлен ОТДЕЛЬНЫЙ ПЛАНИРОВЩИК сканирования');
+console.log('⏰ Добавлено поле ввода пути и кнопка "Открыть" для открытия отчета');
+console.log('⏰ Добавлен интервал "1 мин" для тестирования');
+console.log('🔄 Кнопка интервала горит синим пока планировщик активен');
+console.log('🔄 Графики обновляются автоматически при каждом сканировании');
+console.log('📊 Гистограмма сохраняет горизонтальный скролл при обновлении');
 console.log('💥 Пасхалка: нажми F2 для ЭПИЧНОГО взрыва "ЖАХ!"');
+
+window.addEventListener('scroll', function() {
+    var btn = document.getElementById('scrollTopBtn');
+    if (btn) {
+        if (window.scrollY > 300) {
+            btn.classList.add('show');
+        } else {
+            btn.classList.remove('show');
+        }
+    }
+});
