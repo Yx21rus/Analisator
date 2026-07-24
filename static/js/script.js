@@ -7,6 +7,7 @@ var currentPathId = null;
 var openPaths = [];
 var scheduledTasks = {};
 var refreshIntervals = {};
+var historyCache = [];
 
 // ============================================================
 // ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
@@ -291,12 +292,14 @@ function addPath() {
     pathsToScan.push(path);
     input.value = '';
     updatePathTags();
-    showToast('Добавлен путь: ' + path, 'success');
+    showToast('✅ Добавлен путь: ' + path, 'success');
+    refreshHistory();
 }
 
 function removePath(path) {
     pathsToScan = pathsToScan.filter(function(p) { return p !== path; });
     updatePathTags();
+    refreshHistory();
 }
 
 function updatePathTags() {
@@ -315,7 +318,7 @@ function updatePathTags() {
     
     var html = '';
     pathsToScan.forEach(function(p) {
-        var escapedPath = p.replace(/\\/g, '\\\\');
+        var escapedPath = p.replace(/\\/g, '\\\\\\\\');
         html += '<span class="path-tag">' +
             p +
             '<span class="remove-path" onclick="removePath(\'' + escapedPath + '\')">&times;</span>' +
@@ -332,34 +335,108 @@ document.getElementById('pathInput').addEventListener('keypress', function(e) {
 });
 
 // ============================================================
-// API ВЫЗОВЫ
+// ИСТОРИЯ СКАНИРОВАНИЙ
 // ============================================================
 
 function loadPaths() {
-    fetch('/api/paths')
-        .then(function(r) { return r.json(); })
-        .then(function(paths) {
-            var container = document.getElementById('pathsList');
-            if (paths.length === 0) {
-                if (container) container.innerHTML = '<div class="text-center text-muted py-4"><i class="bi bi-inbox" style="font-size:2rem;"></i><p class="mt-2">Нет сохраненных сканирований</p></div>';
-                return;
+    console.log('🔄 Загрузка истории сканирований...');
+    fetch('/api/paths', {
+        cache: 'no-store',
+        headers: {
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0'
+        }
+    })
+        .then(function(r) { 
+            if (!r.ok) {
+                throw new Error('Ошибка загрузки истории: ' + r.status);
             }
-            var html = '<div class="list-group">';
-            paths.slice(-5).forEach(function(p) {
-                var escapedPath = p.path.replace(/\\/g, '\\\\');
-                html += '<div class="list-group-item list-group-item-action d-flex justify-content-between align-items-center" onclick="openReport(\'' + escapedPath + '\')" style="cursor:pointer;">' +
-                    '<div><i class="bi bi-folder"></i> <strong>' + p.path + '</strong></div>' +
-                    '<span class="badge bg-primary">' + p.disk + '</span>' +
-                '</div>';
-            });
-            html += '</div>';
-            if (container) container.innerHTML = html;
+            return r.json(); 
         })
-        .catch(function(e) { console.error('Ошибка:', e); });
+        .then(function(paths) {
+            console.log('📋 Получены пути из БД:', paths);
+            historyCache = paths;
+            renderHistory(paths);
+        })
+        .catch(function(e) { 
+            console.error('❌ Ошибка загрузки истории:', e);
+            var container = document.getElementById('pathsList');
+            if (container) {
+                container.innerHTML = '<div class="text-center text-danger py-4"><i class="bi bi-exclamation-triangle" style="font-size:2rem;"></i><p class="mt-2">Ошибка загрузки истории</p><small>' + e.message + '</small></div>';
+            }
+        });
 }
+
+function renderHistory(paths) {
+    var container = document.getElementById('pathsList');
+    if (!container) return;
+    
+    if (!paths || paths.length === 0) {
+        container.innerHTML = '<div class="text-center text-muted py-4"><i class="bi bi-inbox" style="font-size:2rem;"></i><p class="mt-2">Нет сохраненных сканирований</p></div>';
+        return;
+    }
+    
+    console.log('📊 Рендеринг истории, всего путей:', paths.length);
+    
+    var html = '<div class="list-group">';
+    var displayPaths = paths.slice(-15).reverse();
+    displayPaths.forEach(function(p) {
+        var displayPath = p.path;
+        var escapedPath = displayPath.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        var diskInfo = p.disk || '';
+        html += '<div class="list-group-item list-group-item-action d-flex justify-content-between align-items-center" onclick="openReport(\'' + escapedPath + '\')" style="cursor:pointer;">' +
+            '<div><i class="bi bi-folder"></i> <strong>' + displayPath + '</strong></div>' +
+            '<span class="badge bg-primary">' + diskInfo + '</span>' +
+        '</div>';
+    });
+    html += '</div>';
+    container.innerHTML = html;
+    console.log('✅ История отрендерена, элементов:', displayPaths.length);
+}
+
+function refreshHistory() {
+    console.log('🔄 Принудительное обновление истории...');
+    var container = document.getElementById('pathsList');
+    if (container) {
+        container.innerHTML = '<div class="text-center text-muted py-4"><div class="spinner-border text-primary" role="status" style="width:2rem;height:2rem;"></div><p class="mt-2">Обновление истории...</p></div>';
+    }
+    setTimeout(function() {
+        loadPaths();
+    }, 300);
+}
+
+function forceRefreshHistory() {
+    console.log('💪 Принудительное обновление истории...');
+    historyCache = [];
+    fetch('/api/paths', {
+        cache: 'no-store',
+        headers: {
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0'
+        }
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(paths) {
+        console.log('📋 Обновленные пути:', paths);
+        historyCache = paths;
+        renderHistory(paths);
+        showToast('🔄 История обновлена (' + paths.length + ' путей)', 'success');
+    })
+    .catch(function(e) {
+        console.error('❌ Ошибка принудительного обновления:', e);
+        showToast('❌ Ошибка обновления истории', 'error');
+    });
+}
+
+// ============================================================
+// API ВЫЗОВЫ
+// ============================================================
 
 function scanSinglePath(path) {
     var normalizedPath = normalizeUncPath(path);
+    console.log('🔍 Сканирование пути:', normalizedPath);
     return fetch('/api/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -373,6 +450,8 @@ function scanSinglePath(path) {
     })
     .then(function(data) {
         if (data.error) throw new Error(data.error);
+        console.log('✅ Сканирование завершено для:', normalizedPath);
+        refreshHistory();
         return data;
     });
 }
@@ -391,10 +470,16 @@ function loadFromDB() {
     }
     if (progress) progress.style.display = 'block';
     
+    var normalizedPaths = pathsToScan.map(function(p) {
+        return normalizeUncPath(p);
+    });
+    
+    console.log('📡 Загрузка из БД для путей:', normalizedPaths);
+    
     fetch('/api/load_from_db', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ paths: pathsToScan })
+        body: JSON.stringify({ paths: normalizedPaths })
     })
     .then(function(response) {
         if (!response.ok) {
@@ -421,8 +506,9 @@ function loadFromDB() {
             return;
         }
         
+        console.log('✅ Загружено из БД:', data.results.length, 'путей');
         showToast('✅ Загружено из БД: ' + data.results.length + ' путей', 'success');
-        loadPaths();
+        refreshHistory();
         showMultipleReports(data.results, 'db');
     })
     .catch(function(error) {
@@ -531,7 +617,7 @@ function renderChart(chartData, divId, pathId) {
 }
 
 // ============================================================
-// РЕНДЕРИНГ ГИСТОГРАММЫ С СОХРАНЕНИЕМ ГОРИЗОНТАЛЬНОГО СКРОЛЛА
+// РЕНДЕРИНГ ГИСТОГРАММЫ
 // ============================================================
 
 function renderSectionedHistogram(chartData, divId, pathId) {
@@ -541,11 +627,9 @@ function renderSectionedHistogram(chartData, divId, pathId) {
         return;
     }
     
-    // Проверяем, есть ли уже обертка со скроллом
     var wrapper = div.closest('.histogram-scroll-wrapper');
     var innerDiv = div;
     
-    // Если обертки нет, создаем ее
     if (!wrapper) {
         var parent = div.parentElement;
         
@@ -730,10 +814,6 @@ function renderSectionedHistogram(chartData, divId, pathId) {
     `;
 }
 
-// ============================================================
-// ФУНКЦИЯ ДЛЯ СКРОЛЛА ГИСТОГРАММЫ
-// ============================================================
-
 function scrollHistogram(divId, delta) {
     var wrapper = document.getElementById(divId);
     if (!wrapper) {
@@ -874,7 +954,7 @@ function loadChartsFromDB(pathId, path) {
 }
 
 // ============================================================
-// ПЛАНИРОВЩИК - ДОБАВЛЕНИЕ ПУТИ
+// ПЛАНИРОВЩИК
 // ============================================================
 
 function addPathToScheduler() {
@@ -887,6 +967,7 @@ function addPathToScheduler() {
     }
     
     path = normalizeUncPath(path);
+    console.log('⏰ Добавление пути в планировщик:', path);
     
     var schedulerPaths = getSchedulerPaths();
     var exists = schedulerPaths.some(function(p) { 
@@ -901,11 +982,8 @@ function addPathToScheduler() {
     addSchedulerPath(path);
     input.value = '';
     showToast('✅ Путь добавлен в планировщик: ' + path, 'success');
+    refreshHistory();
 }
-
-// ============================================================
-// ПОЛУЧЕНИЕ СПИСКА ПУТЕЙ ИЗ ПЛАНИРОВЩИКА (localStorage)
-// ============================================================
 
 function getSchedulerPaths() {
     try {
@@ -934,10 +1012,6 @@ function removeSchedulerPathFromList(path) {
     setSchedulerPaths(paths);
     renderSchedulerList();
 }
-
-// ============================================================
-// ОТОБРАЖЕНИЕ СПИСКА ПУТЕЙ В ПЛАНИРОВЩИКЕ
-// ============================================================
 
 function renderSchedulerList() {
     var container = document.getElementById('schedulerList');
@@ -976,7 +1050,7 @@ function renderSchedulerList() {
         
         var statusClass = isActive ? 'running' : 'stopped';
         var statusText = isActive ? '🟢 ' + getIntervalLabel(activeInterval) : '⚪ Не активен';
-        var escapedPath = path.replace(/\\/g, '\\\\');
+        var escapedPath = path.replace(/\\/g, '\\\\\\\\');
         
         var intervals = ['1min', '30min', 'hour', 'day', 'week', 'month', '3months', '6months', '12months'];
         var intervalLabels = ['1м', '30м', 'Час', 'День', 'Нед', 'Мес', '3м', '6м', '12м'];
@@ -1040,10 +1114,6 @@ function renderSchedulerList() {
     container.innerHTML = html;
 }
 
-// ============================================================
-// ОТКРЫТЬ ОТЧЕТ ИЗ ПЛАНИРОВЩИКА
-// ============================================================
-
 function openReportFromScheduler(path) {
     var normalizedPath = normalizeUncPath(path);
     console.log('📂 Открытие отчета из планировщика для:', normalizedPath);
@@ -1091,6 +1161,7 @@ function openReportFromScheduler(path) {
         }
         
         showMultipleReports([data], 'scheduler');
+        refreshHistory();
         
         setTimeout(function() {
             var newExisting = findOpenPathByPath(normalizedPath);
@@ -1115,10 +1186,6 @@ function openReportFromScheduler(path) {
         showToast('❌ Ошибка: ' + e.message, 'error');
     });
 }
-
-// ============================================================
-// ЗАПУСК ПЛАНИРОВЩИКА ДЛЯ ПУТИ
-// ============================================================
 
 function startSchedulerForPath(path, interval, event) {
     if (event) event.stopPropagation();
@@ -1203,10 +1270,6 @@ function startSchedulerForPath(path, interval, event) {
         showToast('❌ Ошибка: ' + e.message, 'error');
     });
 }
-
-// ============================================================
-// АВТОМАТИЧЕСКОЕ ОБНОВЛЕНИЕ ГРАФИКОВ
-// ============================================================
 
 function startAutoRefresh(path) {
     var normalizedPath = normalizeUncPath(path);
@@ -1308,10 +1371,6 @@ function startAutoRefresh(path) {
     console.log('✅ Автообновление запущено для:', normalizedPath);
 }
 
-// ============================================================
-// ОСТАНОВКА ПЛАНИРОВЩИКА ДЛЯ ПУТИ
-// ============================================================
-
 function stopSchedulerForPath(path, event) {
     if (event) event.stopPropagation();
     
@@ -1361,10 +1420,6 @@ function stopSchedulerForPath(path, event) {
     });
 }
 
-// ============================================================
-// УДАЛЕНИЕ ПУТИ ИЗ ПЛАНИРОВЩИКА
-// ============================================================
-
 function removeSchedulerPath(path) {
     var normalizedPath = normalizeUncPath(path);
     
@@ -1394,10 +1449,6 @@ function removeSchedulerPath(path) {
         showToast('🗑️ Удален из планировщика: ' + normalizedPath, 'info');
     });
 }
-
-// ============================================================
-// ИНИЦИАЛИЗАЦИЯ ПЛАНИРОВЩИКА
-// ============================================================
 
 function initScheduler() {
     console.log('🔄 Инициализация планировщика...');
@@ -1439,12 +1490,7 @@ function updateSidebar() {
         return;
     }
     
-    var schedulerBlock = document.getElementById('schedulerBlock');
     container.innerHTML = '';
-    
-    if (schedulerBlock) {
-        container.appendChild(schedulerBlock);
-    }
     
     var totalFolders = 0;
     var pathIds = Object.keys(multipleDataStore);
@@ -1455,11 +1501,11 @@ function updateSidebar() {
     contentBlock.className = 'content-block';
     contentBlock.id = 'contentBlock';
     contentBlock.innerHTML = `
-        <div class="content-block-header">
+        <div class="sidebar-card-header" style="border-bottom-color: #fd7e14;">
             <span><i class="bi bi-list-ul"></i> 📂 Содержание</span>
             <span class="badge bg-secondary" id="folderCountBadge">${pathIds.length}</span>
         </div>
-        <div class="content-block-body" id="contentBlockBody">
+        <div class="sidebar-card-body" id="contentBlockBody">
     `;
     
     if (pathIds.length === 0) {
@@ -1505,7 +1551,7 @@ function updateSidebar() {
                 treeContainer1.className = 'folder-tree-content';
                 section1.appendChild(treeContainer1);
                 
-                var body = contentBlock.querySelector('.content-block-body');
+                var body = contentBlock.querySelector('#contentBlockBody');
                 if (body) {
                     body.appendChild(section1);
                 }
@@ -1535,7 +1581,7 @@ function updateSidebar() {
                 treeContainer2.className = 'folder-tree-content';
                 section2.appendChild(treeContainer2);
                 
-                var body = contentBlock.querySelector('.content-block-body');
+                var body = contentBlock.querySelector('#contentBlockBody');
                 if (body) {
                     body.appendChild(section2);
                 }
@@ -1557,10 +1603,6 @@ function updateSidebar() {
     
     console.log('✅ Боковая панель обновлена, всего папок:', totalFolders);
 }
-
-// ============================================================
-// ПОСТРОЕНИЕ ДЕРЕВА ПАПОК
-// ============================================================
 
 function buildFolderTreeDirect(container, folders, rootPath, currentPath, level) {
     if (!container) {
@@ -2405,6 +2447,7 @@ function updateExistingReport(pathId, data, sourceType) {
 
 function openReport(path) {
     var normalizedPath = normalizeUncPath(path);
+    console.log('📂 Открытие отчета для:', normalizedPath);
     
     var existing = findOpenPathByPath(normalizedPath);
     if (existing) {
@@ -2429,8 +2472,12 @@ function openReport(path) {
     .then(function(r) { return r.json(); })
     .then(function(data) {
         document.getElementById('loading').style.display = 'none';
-        if (data.error) { showToast('Ошибка: ' + data.error, 'error'); return; }
+        if (data.error) { 
+            showToast('❌ Ошибка: ' + data.error, 'error'); 
+            return; 
+        }
         showMultipleReports([data], 'history');
+        refreshHistory();
     })
     .catch(function(e) {
         document.getElementById('loading').style.display = 'none';
@@ -2636,9 +2683,18 @@ document.getElementById('scanForm').addEventListener('submit', function(e) {
         reportSection.style.display = 'none';
     }
 
-    var promises = pathsToScan.map(function(path) {
+    var normalizedPaths = pathsToScan.map(function(p) {
+        return normalizeUncPath(p);
+    });
+    
+    console.log('🔍 Запуск сканирования для путей:', normalizedPaths);
+
+    var promises = normalizedPaths.map(function(path) {
         return scanSinglePath(path)
-            .then(function(data) { return { success: true, data: data }; })
+            .then(function(data) { 
+                console.log('✅ Успешно отсканирован:', path);
+                return { success: true, data: data }; 
+            })
             .catch(function(err) {
                 console.error('❌ Ошибка для ' + path + ':', err);
                 return { success: false, path: path, error: err.message };
@@ -2660,7 +2716,7 @@ document.getElementById('scanForm').addEventListener('submit', function(e) {
             }
             
             showToast('✅ Сканирование завершено! Обработано ' + valid.length + ' путей', 'success');
-            loadPaths();
+            refreshHistory();
             showMultipleReports(valid, 'scan');
         })
         .finally(function() {
@@ -2711,6 +2767,34 @@ setInterval(function() {
 }, 30000);
 
 // ============================================================
+// КНОПКА ОБНОВЛЕНИЯ ИСТОРИИ
+// ============================================================
+
+document.addEventListener('DOMContentLoaded', function() {
+    var historyHeader = document.querySelector('.history-card .card-header');
+    if (historyHeader) {
+        var refreshBtn = document.createElement('button');
+        refreshBtn.className = 'btn btn-sm btn-light ms-auto';
+        refreshBtn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Обновить';
+        refreshBtn.style.cssText = 'font-size:0.7rem;padding:2px 10px;border-radius:6px;';
+        refreshBtn.onclick = function(e) {
+            e.stopPropagation();
+            forceRefreshHistory();
+        };
+        historyHeader.appendChild(refreshBtn);
+    }
+});
+
+// ============================================================
+// ПЕРИОДИЧЕСКОЕ ОБНОВЛЕНИЕ ИСТОРИИ
+// ============================================================
+
+setInterval(function() {
+    console.log('⏰ Периодическое обновление истории...');
+    loadPaths();
+}, 30000);
+
+// ============================================================
 // ИНИЦИАЛИЗАЦИЯ
 // ============================================================
 
@@ -2731,6 +2815,8 @@ console.log('⏰ Добавлен интервал "1 мин" для тести�
 console.log('🔄 Кнопка интервала горит синим пока планировщик активен');
 console.log('🔄 Графики обновляются автоматически при каждом сканировании');
 console.log('📊 Гистограмма сохраняет горизонтальный скролл при обновлении');
+console.log('🔄 История сканирований обновляется автоматически при добавлении пути');
+console.log('📂 UNC-пути правильно отображаются в истории');
 console.log('💥 Пасхалка: нажми F2 для ЭПИЧНОГО взрыва "ЖАХ!"');
 
 window.addEventListener('scroll', function() {

@@ -708,31 +708,547 @@ div.report-card > div.card-header.d-flex.justify-content-between.align-items-cen
 }
 
 /* ============================================================
-   БОКОВАЯ ПАНЕЛЬ
+   БОКОВАЯ ПАНЕЛЬ - ИСПРАВЛЕННАЯ ВЕРСИЯ
    ============================================================ */
-.sidebar .sidebar-header {
-    font-size: 0.95rem;
+.sidebar {
+    width: 420px;
+    min-width: 360px;
+    max-height: calc(100vh - 200px);
+    overflow-y: auto;
+    background: transparent;
+    border: none;
+    padding: 0;
+    position: sticky;
+    top: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.sidebar::-webkit-scrollbar {
+    width: 6px;
+}
+.sidebar::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 3px;
+}
+.sidebar::-webkit-scrollbar-thumb {
+    background: #c1c7cd;
+    border-radius: 3px;
+}
+.sidebar::-webkit-scrollbar-thumb:hover {
+    background: #a8b0b8;
+}
+
+/* Карточка в боковой панели - единый стиль */
+.sidebar-card {
+    background: white;
+    border-radius: 12px;
+    border: 1px solid #e0e0e0;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+    overflow: hidden;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Последняя карточка (содержание) - растягивается */
+.sidebar-card:last-child {
+    flex: 1;
+    min-height: 200px;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Заголовок карточки - фиксированный */
+.sidebar-card-header {
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    padding: 10px 14px;
+    font-size: 0.85rem;
     font-weight: 700;
     color: #1a1a2e;
-    padding-bottom: 10px;
     border-bottom: 3px solid #0d6efd;
-    margin-bottom: 12px;
     display: flex;
     justify-content: space-between;
     align-items: center;
-    position: sticky;
-    top: 0;
-    background: white;
-    z-index: 10;
+    min-height: 44px;
+    flex-shrink: 0;
 }
 
-.sidebar .sidebar-header .badge {
-    font-size: 0.75rem;
-    padding: 4px 12px;
-    background: #0d6efd !important;
-    color: white !important;
+.sidebar-card-header .badge {
+    font-size: 0.65rem;
+    padding: 3px 10px;
     border-radius: 20px;
     font-weight: 700;
+}
+
+.sidebar-card-header .badge.bg-info {
+    background: #0d6efd !important;
+    color: white !important;
+    box-shadow: 0 2px 4px rgba(13, 110, 253, 0.3);
+}
+
+.sidebar-card-header .badge.bg-secondary {
+    background: #6c757d !important;
+    color: white !important;
+}
+
+/* Тело карточки - растягивается со скроллом */
+.sidebar-card-body {
+    padding: 12px 14px;
+    background: white;
+    flex: 1;
+    overflow-y: auto;
+    max-height: 100%;
+}
+
+/* Для последней карточки - тело скроллится */
+.sidebar-card:last-child .sidebar-card-body {
+    flex: 1;
+    overflow-y: auto;
+    max-height: 100%;
+    padding-bottom: 12px;
+}
+
+/* ============================================================
+   ПЛАНИРОВЩИК
+   ============================================================ */
+.scheduler-add-path {
+    padding: 8px 10px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    margin-bottom: 10px;
+    border: 1px solid #e9ecef;
+}
+
+.scheduler-add-path-row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+.scheduler-add-path-row input {
+    flex: 1;
+    padding: 6px 10px;
+    border: 1px solid #ced4da;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-family: 'Consolas', 'Courier New', monospace;
+    background: white;
+    transition: border-color 0.2s ease;
+}
+
+.scheduler-add-path-row input:focus {
+    border-color: #0d6efd;
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(13, 110, 253, 0.15);
+}
+
+.scheduler-add-path-row input::placeholder {
+    color: #adb5bd;
+    font-size: 0.7rem;
+}
+
+.scheduler-add-path-row .btn-primary {
+    padding: 5px 12px;
+    font-size: 0.7rem;
+    white-space: nowrap;
+    border-radius: 6px;
+}
+
+.scheduler-add-path-info {
+    font-size: 0.55rem;
+    color: #6c757d;
+    margin-top: 4px;
+}
+
+.scheduler-add-path-info i {
+    margin-right: 4px;
+}
+
+/* Список планировщика - ограниченная высота */
+.scheduler-list {
+    max-height: 280px;
+    overflow-y: auto;
+}
+
+.scheduler-list::-webkit-scrollbar {
+    width: 4px;
+}
+.scheduler-list::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 2px;
+}
+.scheduler-list::-webkit-scrollbar-thumb {
+    background: #c1c7cd;
+    border-radius: 2px;
+}
+
+/* Элемент планировщика */
+.scheduler-item {
+    padding: 6px 8px;
+    border-radius: 6px;
+    margin-bottom: 4px;
+    transition: background 0.15s;
+    border: 1px solid transparent;
+    background: #fafbfc;
+}
+
+.scheduler-item:hover {
+    background: #e8f4fd;
+    border-color: #e9ecef;
+}
+
+.scheduler-item-path {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.72rem;
+    flex-wrap: wrap;
+}
+
+.scheduler-item-path .status-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.scheduler-item-path .status-dot.running {
+    background: #28a745;
+    animation: pulse-green 1.5s infinite;
+}
+
+.scheduler-item-path .status-dot.stopped {
+    background: #dc3545;
+}
+
+.scheduler-item-path .path-text {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #495057;
+    font-weight: 500;
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 0.7rem;
+    min-width: 50px;
+}
+
+.scheduler-item-path .scheduler-status-badge {
+    font-size: 0.5rem;
+    padding: 1px 8px;
+    border-radius: 10px;
+    background: #f1f3f5;
+    color: #495057;
+    white-space: nowrap;
+    flex-shrink: 0;
+    font-weight: 600;
+}
+
+.scheduler-interval-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.btn-scheduler-interval {
+    font-size: 0.45rem;
+    padding: 1px 5px;
+    border-radius: 6px;
+    border: 1px solid #dee2e6;
+    background: white;
+    color: #495057;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.btn-scheduler-interval:hover {
+    background: #e9ecef;
+    transform: scale(1.05);
+}
+
+.btn-scheduler-interval.active {
+    background: #0d6efd;
+    color: white;
+    border-color: #0d6efd;
+    box-shadow: 0 2px 4px rgba(13, 110, 253, 0.3);
+}
+
+.scheduler-actions {
+    display: flex;
+    gap: 3px;
+    align-items: center;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+}
+
+.btn-scheduler-start {
+    font-size: 0.5rem;
+    padding: 1px 8px;
+    border-radius: 8px;
+    border: none;
+    background: linear-gradient(135deg, #28a745 0%, #1e7e34 100%);
+    color: white;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.btn-scheduler-start:hover {
+    transform: scale(1.05);
+    box-shadow: 0 2px 6px rgba(40, 167, 69, 0.3);
+}
+
+.btn-scheduler-stop {
+    font-size: 0.5rem;
+    padding: 1px 8px;
+    border-radius: 8px;
+    border: none;
+    background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+    color: white;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.btn-scheduler-stop:hover {
+    transform: scale(1.05);
+    box-shadow: 0 2px 6px rgba(220, 53, 69, 0.3);
+}
+
+.btn-scheduler-start.hidden,
+.btn-scheduler-stop.hidden {
+    display: none;
+}
+
+.btn-open-report {
+    font-size: 0.5rem;
+    padding: 1px 8px;
+    border-radius: 8px;
+    border: 1px solid #6f42c1;
+    background: white;
+    color: #6f42c1;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.btn-open-report:hover {
+    background: #6f42c1;
+    color: white;
+    transform: scale(1.05);
+}
+
+.btn-open-report i {
+    margin-right: 2px;
+}
+
+.btn-remove-scheduler {
+    font-size: 0.6rem;
+    padding: 1px 4px;
+    border-radius: 50%;
+    border: none;
+    background: transparent;
+    color: #dc3545;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+    width: 18px;
+    height: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.btn-remove-scheduler:hover {
+    background: #dc3545;
+    color: white;
+    transform: scale(1.1);
+}
+
+.scheduler-info {
+    font-size: 0.45rem;
+    color: #6c757d;
+    font-style: italic;
+    flex-shrink: 0;
+}
+
+.empty-scheduler {
+    padding: 16px;
+    text-align: center;
+    color: #6c757d;
+}
+
+.empty-scheduler i {
+    color: #bdc3c7;
+}
+
+@keyframes pulse-green {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(0.8); }
+}
+
+/* ============================================================
+   СОДЕРЖАНИЕ - ДЕРЕВО ПАПОК
+   ============================================================ */
+.folder-tree-section {
+    margin-bottom: 10px;
+    border-bottom: 1px solid #f0f0f0;
+    padding-bottom: 8px;
+}
+
+.folder-tree-section:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+    padding-bottom: 0;
+}
+
+.folder-tree-header {
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: #495057;
+    padding: 4px 6px 6px 6px;
+    border-bottom: 2px solid #0d6efd;
+    margin-bottom: 6px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    user-select: none;
+    border-radius: 4px;
+    transition: background 0.2s;
+}
+
+.folder-tree-header:hover {
+    background: #f8f9fa;
+}
+
+.folder-tree-header .path-text {
+    font-weight: 400;
+    font-size: 0.65rem;
+    color: #6c757d;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 200px;
+}
+
+.folder-tree-header .badge {
+    font-size: 0.55rem;
+    padding: 2px 8px;
+    border-radius: 12px;
+    background: #0d6efd !important;
+    color: white !important;
+}
+
+.folder-tree {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.folder-tree li {
+    padding: 0;
+}
+
+.folder-item {
+    display: flex;
+    align-items: center;
+    padding: 3px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.15s;
+    font-size: 0.78rem;
+    gap: 6px;
+}
+
+.folder-item:hover {
+    background: #e8f4fd;
+}
+
+.folder-item.active {
+    background: #cce5ff;
+    font-weight: 600;
+}
+
+.folder-item .folder-icon {
+    color: #fd7e14;
+    font-size: 0.85rem;
+}
+
+.folder-item .folder-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.folder-item .folder-size {
+    font-size: 0.6rem;
+    color: #6c757d;
+    background: #f1f3f5;
+    padding: 1px 6px;
+    border-radius: 10px;
+}
+
+.folder-item .level-badge-sm {
+    font-size: 0.5rem;
+    padding: 1px 6px;
+    border-radius: 10px;
+    background: #e9ecef;
+    color: #495057;
+}
+
+.folder-item .level-badge-sm.level1 {
+    background: #fd7e14;
+    color: white;
+}
+
+.folder-item .level-badge-sm.level2 {
+    background: #0d6efd;
+    color: white;
+}
+
+/* Содержание - блок */
+.content-block {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.content-block-body {
+    flex: 1;
+    overflow-y: auto;
+    max-height: 400px;
+    padding: 4px 0;
+}
+
+.content-block-body::-webkit-scrollbar {
+    width: 4px;
+}
+.content-block-body::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 2px;
+}
+.content-block-body::-webkit-scrollbar-thumb {
+    background: #c1c7cd;
+    border-radius: 2px;
+}
+
+.empty-sidebar {
+    padding: 20px;
+    text-align: center;
+    color: #6c757d;
+    font-size: 0.85rem;
 }
 
 /* ============================================================
@@ -826,9 +1342,7 @@ div.report-card > div.card-header.d-flex.justify-content-between.align-items-cen
     height: 400px !important;
 }
 
-/* ============================================================
-   УБИРАЕМ СТАРЫЕ КЛАССЫ
-   ============================================================ */
+/* Убираем старые классы */
 .chart-row,
 .chart-col,
 .histogram-col,
@@ -1102,383 +1616,230 @@ div.report-card > div.card-header.d-flex.justify-content-between.align-items-cen
 }
 
 /* ============================================================
-   СТИЛИ ДЛЯ ПЛАНИРОВЩИКА (НОВЫЕ)
+   КНОПКА НАВЕРХ
    ============================================================ */
-
-/* Блок планировщика в боковой панели */
-.scheduler-block {
-    margin-bottom: 15px;
-    border-bottom: 2px solid #e9ecef;
-    padding-bottom: 10px;
-}
-
-.scheduler-block-header {
-    font-size: 0.8rem;
-    font-weight: 700;
-    color: #1a1a2e;
-    padding: 4px 0 6px 0;
-    border-bottom: 3px solid #0d6efd;
-    margin-bottom: 8px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-    border-radius: 6px 6px 0 0;
-    padding: 6px 10px;
-}
-
-.scheduler-block-header .badge {
-    font-size: 0.65rem;
-    padding: 3px 10px;
-    background: #0d6efd !important;
-    color: white !important;
-    font-weight: 700;
-    border-radius: 20px;
-    box-shadow: 0 2px 4px rgba(13, 110, 253, 0.3);
-}
-
-.scheduler-block-body {
-    max-height: 300px;
-    overflow-y: auto;
-}
-
-.scheduler-block-body::-webkit-scrollbar {
-    width: 4px;
-}
-.scheduler-block-body::-webkit-scrollbar-track {
-    background: #f1f1f1;
-    border-radius: 2px;
-}
-.scheduler-block-body::-webkit-scrollbar-thumb {
-    background: #c1c7cd;
-    border-radius: 2px;
-}
-
-/* Элемент планировщика */
-.scheduler-item {
-    position: relative;
-    padding: 4px 8px;
-    border-radius: 4px;
-    margin-bottom: 2px;
-    transition: background 0.15s;
-    cursor: default;
-}
-
-.scheduler-item:hover {
-    background: #e8f4fd;
-}
-
-.scheduler-item-path {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 0.78rem;
-}
-
-.scheduler-item-path .status-dot {
-    display: inline-block;
-    width: 8px;
-    height: 8px;
+.scroll-top-btn {
+    position: fixed;
+    bottom: 30px;
+    right: 30px;
+    width: 55px;
+    height: 55px;
     border-radius: 50%;
-    flex-shrink: 0;
-}
-
-.scheduler-item-path .status-dot.running {
-    background: #28a745;
-    animation: pulse-green 1.5s infinite;
-}
-
-.scheduler-item-path .status-dot.stopped {
-    background: #dc3545;
-}
-
-.scheduler-item-path .path-text {
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    color: #495057;
-    font-weight: 500;
-    font-family: 'Consolas', 'Courier New', monospace;
-    font-size: 0.7rem;
-}
-
-.scheduler-item-path .scheduler-status-badge {
-    font-size: 0.6rem;
-    padding: 1px 8px;
-    border-radius: 10px;
-    background: #f1f3f5;
-    color: #495057;
-    white-space: nowrap;
-    flex-shrink: 0;
-    font-weight: 600;
-}
-
-/* Выпадающее меню планировщика */
-.scheduler-dropdown {
+    background: linear-gradient(135deg, #0d6efd, #0a58ca);
+    color: white;
+    border: none;
+    box-shadow: 0 4px 20px rgba(13, 110, 253, 0.4);
+    cursor: pointer;
+    font-size: 1.5rem;
     display: none;
-    padding: 8px 10px;
-    margin-top: 4px;
-    background: #f8f9fa;
-    border-radius: 6px;
-    border: 1px solid #e9ecef;
-    animation: fadeIn 0.2s ease;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s ease;
+    z-index: 9999;
+    opacity: 0;
+    transform: translateY(20px);
 }
 
-.scheduler-dropdown.show {
-    display: block;
+.scroll-top-btn.show {
+    display: flex;
+    opacity: 1;
+    transform: translateY(0);
 }
 
-@keyframes fadeIn {
-    from { opacity: 0; transform: translateY(-4px); }
+.scroll-top-btn:hover {
+    background: linear-gradient(135deg, #0a58ca, #084298);
+    transform: translateY(-3px) scale(1.05);
+    box-shadow: 0 6px 30px rgba(13, 110, 253, 0.5);
+}
+
+.scroll-top-btn:active {
+    transform: scale(0.95);
+}
+
+.scroll-top-btn i {
+    font-size: 1.8rem;
+}
+
+@keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(20px); }
     to { opacity: 1; transform: translateY(0); }
 }
 
-.dropdown-interval-label {
-    font-size: 0.65rem;
-    color: #495057;
-    font-weight: 700;
-    margin-bottom: 4px;
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
-}
-
-.dropdown-interval-buttons {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 3px;
-    margin-bottom: 6px;
-}
-
-.btn-scheduler-interval {
-    font-size: 0.55rem;
-    padding: 2px 8px;
-    border-radius: 10px;
-    border: 1px solid #dee2e6;
-    background: white;
-    color: #495057;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    font-weight: 600;
-}
-
-.btn-scheduler-interval:hover {
-    background: #e9ecef;
-    transform: scale(1.05);
-}
-
-.btn-scheduler-interval.active {
-    background: #0d6efd;
-    color: white;
-    border-color: #0d6efd;
-    box-shadow: 0 2px 6px rgba(13, 110, 253, 0.3);
-}
-
-.dropdown-actions {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex-wrap: wrap;
-    margin-top: 4px;
-}
-
-.btn-scheduler-start {
-    font-size: 0.6rem;
-    padding: 2px 12px;
-    border-radius: 10px;
-    border: none;
-    background: linear-gradient(135deg, #28a745 0%, #1e7e34 100%);
-    color: white;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    font-weight: 700;
-    box-shadow: 0 2px 4px rgba(40, 167, 69, 0.3);
-}
-
-.btn-scheduler-start:hover {
-    transform: scale(1.05);
-    box-shadow: 0 4px 8px rgba(40, 167, 69, 0.4);
-}
-
-.btn-scheduler-stop {
-    font-size: 0.6rem;
-    padding: 2px 12px;
-    border-radius: 10px;
-    border: none;
-    background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
-    color: white;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    font-weight: 700;
-    box-shadow: 0 2px 4px rgba(220, 53, 69, 0.3);
-}
-
-.btn-scheduler-stop:hover {
-    transform: scale(1.05);
-    box-shadow: 0 4px 8px rgba(220, 53, 69, 0.4);
-}
-
-.btn-scheduler-start.hidden,
-.btn-scheduler-stop.hidden {
-    display: none;
-}
-
-.scheduler-info {
-    font-size: 0.55rem;
-    color: #6c757d;
-    font-style: italic;
-}
-
-.empty-scheduler {
-    padding: 10px;
-    text-align: center;
-    color: #6c757d;
-}
-
-.empty-scheduler i {
-    color: #bdc3c7;
-}
-
-/* Блок содержания (папки) */
-.content-block {
-    margin-top: 5px;
-}
-
-.content-block-header {
-    font-size: 0.8rem;
-    font-weight: 700;
-    color: #1a1a2e;
-    padding: 4px 0 6px 0;
-    border-bottom: 3px solid #0d6efd;
-    margin-bottom: 8px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-    border-radius: 6px 6px 0 0;
-    padding: 6px 10px;
-}
-
-.content-block-header .badge {
-    font-size: 0.65rem;
-    padding: 3px 10px;
-    background: #0d6efd !important;
-    color: white !important;
-    font-weight: 700;
-    border-radius: 20px;
-    box-shadow: 0 2px 4px rgba(13, 110, 253, 0.3);
-}
-
-.content-block-body {
-    max-height: 500px;
-    overflow-y: auto;
-}
-
-.content-block-body::-webkit-scrollbar {
-    width: 4px;
-}
-.content-block-body::-webkit-scrollbar-track {
-    background: #f1f1f1;
-    border-radius: 2px;
-}
-.content-block-body::-webkit-scrollbar-thumb {
-    background: #c1c7cd;
-    border-radius: 2px;
-}
-
-/* Анимация для зеленого индикатора */
-@keyframes pulse-green {
-    0%, 100% { opacity: 1; transform: scale(1); }
-    50% { opacity: 0.5; transform: scale(0.8); }
+.scroll-top-btn.show {
+    animation: fadeInUp 0.3s ease forwards;
 }
 
 /* ============================================================
-   АДАПТИВНОСТЬ ДЛЯ МОБИЛЬНЫХ
+   КНОПКА EXCEL
    ============================================================ */
+.btn-excel {
+    background: #1d6f42;
+    color: white;
+    border: none;
+    padding: 4px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.75rem;
+    font-weight: 700;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 4px rgba(29, 111, 66, 0.3);
+}
+
+.btn-excel:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(29, 111, 66, 0.4);
+    background: #155a34;
+}
+
+.btn-excel i {
+    margin-right: 4px;
+}
+
+/* ============================================================
+   АДАПТИВНОСТЬ
+   ============================================================ */
+@media (max-width: 1200px) {
+    .sidebar {
+        width: 380px;
+        min-width: 320px;
+    }
+}
+
+@media (max-width: 992px) {
+    .sidebar {
+        width: 100%;
+        max-height: 450px;
+        position: relative;
+        top: 0;
+        gap: 8px;
+    }
+    .sidebar-card:last-child {
+        min-height: 150px;
+    }
+    .scheduler-list {
+        max-height: 200px;
+    }
+    .content-block-body {
+        max-height: 250px;
+    }
+    .top-panel .scan-card {
+        flex: 1;
+        width: 100%;
+    }
+    .accordion-report .accordion-header .header-left .stat-info {
+        display: none;
+    }
+    .folder-tree-header .path-text {
+        max-width: 120px;
+    }
+    .scheduler-item-path {
+        font-size: 0.68rem;
+    }
+}
+
 @media (max-width: 768px) {
-    .navbar-custom .navbar-brand {
-        font-size: 1.2rem;
+    .sidebar {
+        max-height: 400px;
+        gap: 6px;
     }
-    
-    .navbar-custom .navbar-text {
-        font-size: 0.8rem;
+    .sidebar-card-header {
+        padding: 8px 12px;
+        font-size: 0.75rem;
+        min-height: 36px;
     }
-    
+    .sidebar-card-body {
+        padding: 8px 10px;
+    }
+    .scheduler-list {
+        max-height: 160px;
+    }
+    .content-block-body {
+        max-height: 180px;
+    }
+    .scheduler-add-path-row input {
+        font-size: 0.7rem;
+    }
+    .scheduler-item-path {
+        font-size: 0.62rem;
+    }
+    .btn-scheduler-interval {
+        font-size: 0.4rem;
+        padding: 1px 4px;
+    }
+    .btn-scheduler-start,
+    .btn-scheduler-stop,
+    .btn-open-report {
+        font-size: 0.45rem;
+        padding: 1px 6px;
+    }
     .stat-item .value {
         font-size: 1.2rem;
     }
-    
     .card-header {
         font-size: 1rem;
         padding: 0.8rem 1rem;
     }
-    
     .card-body {
         padding: 1rem;
     }
-    
     .btn-primary {
         padding: 8px 20px;
         font-size: 0.9rem;
     }
-    
     #pathsList .list-group-item {
         padding: 12px 15px;
     }
-    
     .table-responsive {
         max-height: 300px;
     }
-    
     .charts-vertical-container {
         gap: 15px;
         margin: 10px 0;
     }
-    
     .chart-dynamic .chart-card .chart-wrapper {
         min-height: 300px;
     }
-    
     .chart-histogram .chart-card .chart-wrapper {
         min-height: 250px;
     }
-    
     .chart-histogram .chart-card .chart-wrapper .plotly-graph-div {
         height: 300px !important;
     }
-    
     .navigation-bar {
         gap: 10px;
     }
-    
     .btn-back, .btn-home {
         padding: 4px 12px;
         font-size: 0.8rem;
     }
-    
     .sidebar .folder-tree-header .path-text {
         max-width: 120px;
         font-size: 0.6rem;
     }
-    
     div.report-card > div.card-header.d-flex.justify-content-between.align-items-center strong {
         font-size: 0.85rem !important;
         padding: 2px 10px !important;
     }
-    
     .scheduler-item-path .path-text {
         font-size: 0.65rem;
     }
-    
     .scheduler-item-path .scheduler-status-badge {
         font-size: 0.5rem;
         padding: 1px 6px;
     }
-    
     .btn-scheduler-interval {
         font-size: 0.5rem;
         padding: 1px 6px;
+    }
+    .scroll-top-btn {
+        bottom: 20px;
+        right: 20px;
+        width: 48px;
+        height: 48px;
+        font-size: 1.2rem;
+    }
+    .scroll-top-btn i {
+        font-size: 1.5rem;
     }
 }
 
@@ -1486,90 +1847,71 @@ div.report-card > div.card-header.d-flex.justify-content-between.align-items-cen
     .stat-item .value {
         font-size: 1rem;
     }
-    
     .stat-item .label {
         font-size: 0.65rem;
     }
-    
     .stat-item {
         padding: 8px 10px;
         min-width: 70px;
     }
-    
     .chart-dynamic .chart-card {
         padding: 12px;
     }
-    
     .chart-histogram .chart-card {
         padding: 12px;
     }
-    
     .chart-dynamic .chart-card .chart-wrapper {
         min-height: 250px;
     }
-    
     .chart-histogram .chart-card .chart-wrapper {
         min-height: 200px;
     }
-    
     .chart-histogram .chart-card .chart-wrapper .plotly-graph-div {
         height: 250px !important;
     }
-    
     .loading {
         padding: 30px 15px;
         width: 90%;
         min-width: auto;
     }
-    
     .loading .spinner-border {
         width: 3rem;
         height: 3rem;
     }
-    
     .toast-custom {
         min-width: 200px;
         padding: 12px 15px;
     }
-    
     .path-tag {
         font-size: 0.8rem;
         padding: 3px 10px;
     }
-    
     .sidebar .folder-tree-header .path-text {
         max-width: 80px;
         font-size: 0.55rem;
     }
-    
     div.report-card > div.card-header.d-flex.justify-content-between.align-items-center strong {
         font-size: 0.75rem !important;
         padding: 2px 8px !important;
     }
-    
     div.report-card > div.card-header.d-flex.justify-content-between.align-items-center .level-badge {
         font-size: 0.6rem !important;
         padding: 2px 10px !important;
     }
-    
     .scheduler-item-path .path-text {
         font-size: 0.6rem;
     }
-    
     .scheduler-item-path .scheduler-status-badge {
         font-size: 0.45rem;
         padding: 1px 4px;
     }
-    
     .dropdown-interval-buttons {
         gap: 2px;
     }
-    
     .btn-scheduler-interval {
         font-size: 0.45rem;
         padding: 1px 5px;
     }
-    
     .btn-scheduler-start,
     .btn-scheduler-stop {
         font-size: 0.5rem;
@@ -1663,371 +2005,488 @@ div.report-card > div.card-header.d-flex.justify-content-between.align-items-cen
     transform: translateY(-50%);
     color: #b0b0b0;
 }
+
 /* ============================================================
-   СТИЛИ ДЛЯ ПЛАНИРОВЩИКА (ОТДЕЛЬНЫЙ БЛОК)
+   ОТКРЫТЫЕ ПУТИ
    ============================================================ */
-
-.scheduler-block {
-    background: white;
-    border-radius: 10px;
-    border: 1px solid #e0e0e0;
-    padding: 12px;
-    margin-bottom: 15px;
-}
-
-.scheduler-block-header {
-    font-size: 0.9rem;
-    font-weight: 700;
-    color: #1a1a2e;
-    padding-bottom: 8px;
-    border-bottom: 3px solid #0d6efd;
-    margin-bottom: 10px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.scheduler-block-header .badge {
-    font-size: 0.7rem;
-    padding: 4px 12px;
-    background: #0d6efd !important;
-    color: white !important;
-    border-radius: 20px;
-    font-weight: 700;
-}
-
-/* Добавление пути */
-.scheduler-add-path {
-    padding: 8px 10px;
-    background: #f8f9fa;
-    border-radius: 8px;
-    margin-bottom: 10px;
-    border: 1px solid #e9ecef;
-}
-
-.scheduler-add-path-row {
-    display: flex;
-    gap: 6px;
-    align-items: center;
-}
-
-.scheduler-add-path-row input {
-    flex: 1;
-    padding: 6px 10px;
-    border: 1px solid #ced4da;
-    border-radius: 6px;
-    font-size: 0.8rem;
-    font-family: 'Consolas', 'Courier New', monospace;
-    background: white;
-    transition: border-color 0.2s ease;
-}
-
-.scheduler-add-path-row input:focus {
-    border-color: #0d6efd;
-    outline: none;
-    box-shadow: 0 0 0 2px rgba(13, 110, 253, 0.15);
-}
-
-.scheduler-add-path-row input::placeholder {
-    color: #adb5bd;
-}
-
-.scheduler-add-path-row .btn-primary {
-    padding: 6px 14px;
-    font-size: 0.75rem;
-    white-space: nowrap;
-    border-radius: 6px;
-}
-
-.scheduler-add-path-info {
-    font-size: 0.6rem;
-    color: #6c757d;
-    margin-top: 4px;
-}
-
-.scheduler-add-path-info i {
-    margin-right: 4px;
-}
-
-/* Список путей в планировщике */
-.scheduler-list {
-    max-height: 400px;
+.open-paths-list {
+    margin-top: 10px;
+    max-height: 150px;
     overflow-y: auto;
+    border: 1px solid #e9ecef;
+    border-radius: 6px;
+    padding: 4px 6px;
+    background: #f8f9fa;
 }
 
-.scheduler-list::-webkit-scrollbar {
+.open-paths-list::-webkit-scrollbar {
     width: 4px;
 }
-.scheduler-list::-webkit-scrollbar-track {
+.open-paths-list::-webkit-scrollbar-track {
     background: #f1f1f1;
     border-radius: 2px;
 }
-.scheduler-list::-webkit-scrollbar-thumb {
+.open-paths-list::-webkit-scrollbar-thumb {
     background: #c1c7cd;
     border-radius: 2px;
 }
 
-/* Элемент планировщика */
-.scheduler-item {
-    padding: 6px 8px;
-    border-radius: 6px;
-    margin-bottom: 4px;
-    transition: background 0.15s;
-    cursor: default;
-    border: 1px solid transparent;
-}
-
-.scheduler-item:hover {
-    background: #e8f4fd;
-    border-color: #e9ecef;
-}
-
-.scheduler-item-path {
+.open-path-item {
     display: flex;
+    justify-content: space-between;
     align-items: center;
-    gap: 8px;
-    font-size: 0.78rem;
-    flex-wrap: wrap;
+    padding: 3px 6px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    border-bottom: 1px solid #f0f0f0;
+    transition: background 0.2s;
 }
 
-.scheduler-item-path .status-dot {
-    display: inline-block;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    flex-shrink: 0;
+.open-path-item:last-child {
+    border-bottom: none;
 }
 
-.scheduler-item-path .status-dot.running {
-    background: #28a745;
-    animation: pulse-green 1.5s infinite;
+.open-path-item:hover {
+    background: #e9ecef;
 }
 
-.scheduler-item-path .status-dot.stopped {
-    background: #dc3545;
-}
-
-.scheduler-item-path .path-text {
+.open-path-item .path-name {
     flex: 1;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    color: #495057;
-    font-weight: 500;
     font-family: 'Consolas', 'Courier New', monospace;
     font-size: 0.75rem;
-    min-width: 80px;
-}
-
-.scheduler-item-path .scheduler-status-badge {
-    font-size: 0.6rem;
-    padding: 2px 10px;
-    border-radius: 12px;
-    background: #f1f3f5;
     color: #495057;
-    white-space: nowrap;
-    flex-shrink: 0;
-    font-weight: 600;
 }
 
-/* Кнопка "Показать данные" */
-.btn-show-data {
-    font-size: 0.6rem;
-    padding: 2px 10px;
-    border-radius: 12px;
-    border: 1px solid #0d6efd;
-    background: white;
-    color: #0d6efd;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    white-space: nowrap;
-    flex-shrink: 0;
-}
-
-.btn-show-data:hover {
-    background: #0d6efd;
-    color: white;
-    transform: scale(1.03);
-}
-
-.btn-show-data i {
-    margin-right: 3px;
-}
-
-/* Кнопка удаления из планировщика */
-.btn-remove-scheduler {
-    font-size: 0.7rem;
-    padding: 2px 6px;
-    border-radius: 50%;
+.open-path-item .path-close-btn {
+    background: none;
     border: none;
-    background: transparent;
     color: #dc3545;
     cursor: pointer;
-    transition: all 0.2s ease;
-    flex-shrink: 0;
-    width: 24px;
-    height: 24px;
+    padding: 0 4px;
+    font-size: 1rem;
+    line-height: 1;
+    transition: all 0.2s;
+    opacity: 0.6;
+}
+
+.open-path-item .path-close-btn:hover {
+    opacity: 1;
+    transform: scale(1.2);
+    color: #c82333;
+}
+
+.open-path-item .path-badge {
+    font-size: 0.55rem;
+    padding: 1px 6px;
+    border-radius: 10px;
+    margin-right: 6px;
+    background: #0d6efd;
+    color: white;
+}
+
+.open-path-item .path-badge.db {
+    background: #28a745;
+}
+
+.open-path-item .path-badge.scan {
+    background: #fd7e14;
+}
+
+.open-path-item .path-badge.scheduler {
+    background: #6f42c1;
+}
+
+/* ============================================================
+   АККОРДЕОН ОТЧЕТОВ
+   ============================================================ */
+.accordion-report {
+    margin-bottom: 15px;
+    border: 1px solid #dee2e6;
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.accordion-report .accordion-header {
+    background: #f8f9fa;
+    padding: 12px 20px;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: background 0.2s;
+    user-select: none;
+    border-bottom: 1px solid #dee2e6;
+}
+
+.accordion-report .accordion-header:hover {
+    background: #e9ecef;
+}
+
+.accordion-report .accordion-header .header-left {
     display: flex;
     align-items: center;
-    justify-content: center;
+    gap: 12px;
+    flex: 1;
+    min-width: 0;
 }
 
-.btn-remove-scheduler:hover {
-    background: #dc3545;
+.accordion-report .accordion-header .header-left .path-name {
+    font-weight: 600;
+    font-size: 0.95rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #1a1a2e;
+    font-family: 'Consolas', 'Courier New', monospace;
+}
+
+.accordion-report .accordion-header .header-left .path-badge {
+    font-size: 0.6rem;
+    padding: 2px 10px;
+    border-radius: 12px;
+    background: #0d6efd;
     color: white;
-    transform: scale(1.1);
 }
 
-/* Выпадающее меню планировщика */
-.scheduler-dropdown {
+.accordion-report .accordion-header .header-left .path-badge.db {
+    background: #28a745;
+}
+
+.accordion-report .accordion-header .header-left .path-badge.scan {
+    background: #fd7e14;
+}
+
+.accordion-report .accordion-header .header-left .path-badge.scheduler {
+    background: #6f42c1;
+}
+
+.accordion-report .accordion-header .header-left .stat-info {
+    font-size: 0.75rem;
+    color: #6c757d;
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+
+.accordion-report .accordion-header .header-left .stat-info span {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+}
+
+.accordion-report .accordion-header .header-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.accordion-report .accordion-header .header-right .btn-sm {
+    font-size: 0.7rem;
+    padding: 2px 10px;
+}
+
+.accordion-report .accordion-header .accordion-toggle {
+    font-size: 1.2rem;
+    transition: transform 0.3s ease;
+    color: #6c757d;
+    margin-left: 8px;
+}
+
+.accordion-report .accordion-header .accordion-toggle.collapsed {
+    transform: rotate(-90deg);
+}
+
+.accordion-report .accordion-body {
+    padding: 20px;
+    background: white;
     display: none;
-    padding: 8px 10px;
-    margin-top: 4px;
-    background: #f8f9fa;
-    border-radius: 6px;
-    border: 1px solid #e9ecef;
-    animation: fadeIn 0.2s ease;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
 }
 
-.scheduler-dropdown.show {
+.accordion-report .accordion-body.show {
     display: block;
 }
 
-@keyframes fadeIn {
-    from { opacity: 0; transform: translateY(-4px); }
-    to { opacity: 1; transform: translateY(0); }
-}
-
-.dropdown-interval-label {
-    font-size: 0.65rem;
-    color: #495057;
-    font-weight: 700;
-    margin-bottom: 4px;
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
-}
-
-.dropdown-interval-buttons {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 3px;
-    margin-bottom: 6px;
-}
-
-.btn-scheduler-interval {
-    font-size: 0.55rem;
-    padding: 2px 8px;
-    border-radius: 10px;
-    border: 1px solid #dee2e6;
-    background: white;
-    color: #495057;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    font-weight: 600;
-}
-
-.btn-scheduler-interval:hover {
-    background: #e9ecef;
-    transform: scale(1.05);
-}
-
-.btn-scheduler-interval.active {
-    background: #0d6efd;
-    color: white;
-    border-color: #0d6efd;
-    box-shadow: 0 2px 6px rgba(13, 110, 253, 0.3);
-}
-
-.dropdown-actions {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex-wrap: wrap;
-    margin-top: 4px;
-}
-
-.btn-scheduler-start {
-    font-size: 0.6rem;
-    padding: 3px 14px;
-    border-radius: 12px;
-    border: none;
-    background: linear-gradient(135deg, #28a745 0%, #1e7e34 100%);
-    color: white;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    font-weight: 700;
-    box-shadow: 0 2px 4px rgba(40, 167, 69, 0.3);
-}
-
-.btn-scheduler-start:hover {
-    transform: scale(1.05);
-    box-shadow: 0 4px 8px rgba(40, 167, 69, 0.4);
-}
-
-.btn-scheduler-stop {
-    font-size: 0.6rem;
-    padding: 3px 14px;
-    border-radius: 12px;
-    border: none;
-    background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
-    color: white;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    font-weight: 700;
-    box-shadow: 0 2px 4px rgba(220, 53, 69, 0.3);
-}
-
-.btn-scheduler-stop:hover {
-    transform: scale(1.05);
-    box-shadow: 0 4px 8px rgba(220, 53, 69, 0.4);
-}
-
-.btn-scheduler-start.hidden,
-.btn-scheduler-stop.hidden {
+/* ============================================================
+   УРОВЕНЬ 2 СЕКЦИЯ
+   ============================================================ */
+.level-2-section {
     display: none;
 }
 
-.scheduler-info {
-    font-size: 0.55rem;
+.level-2-section.active {
+    display: block;
+}
+
+/* ============================================================
+   FOLDERS SECTION
+   ============================================================ */
+.folders-section {
+    background: #f8f9fa;
+    border-radius: 6px;
+    padding: 10px;
+    border: 1px solid #e9ecef;
+    margin-top: 8px;
+}
+
+.folders-section .folders-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.folders-section .folders-header h6 {
+    margin: 0;
+    font-size: 0.9rem;
+}
+
+.folders-section .folders-header h6 span {
+    color: #0d6efd;
+    background: rgba(13, 110, 253, 0.1);
+    padding: 0 8px;
+    border-radius: 4px;
+}
+
+.folders-section .folders-nav {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.folders-section .list-group-item {
+    border-left: 3px solid #fd7e14;
+    padding: 6px 12px;
+    font-size: 0.9rem;
+}
+
+.folders-section.level-2 .list-group-item {
+    border-left-color: #0d6efd;
+}
+
+.folders-section .list-group-item .badge {
+    font-size: 0.75rem;
+}
+
+.nav-empty {
     color: #6c757d;
+    font-size: 0.8rem;
     font-style: italic;
 }
 
-.empty-scheduler {
-    padding: 20px;
-    text-align: center;
-    color: #6c757d;
+.breadcrumb-nav {
+    font-size: 0.8rem;
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
 }
 
-.empty-scheduler i {
-    color: #bdc3c7;
+.breadcrumb-nav .breadcrumb-item {
+    font-size: 0.8rem;
+    display: inline-flex;
+    align-items: center;
 }
 
-@keyframes pulse-green {
-    0%, 100% { opacity: 1; transform: scale(1); }
-    50% { opacity: 0.5; transform: scale(0.8); }
-}
-
-.btn-open-report {
-    font-size: 0.55rem;
-    padding: 2px 10px;
-    border-radius: 10px;
-    border: 1px solid #6f42c1;
-    background: white;
-    color: #6f42c1;
+.breadcrumb-nav .breadcrumb-item a {
+    color: #007bff;
+    text-decoration: none;
     cursor: pointer;
-    transition: all 0.2s ease;
+}
+
+.breadcrumb-nav .breadcrumb-item a:hover {
+    text-decoration: underline;
+}
+
+.breadcrumb-nav .breadcrumb-item.active {
+    color: #495057;
+}
+
+.breadcrumb-nav .breadcrumb-item + .breadcrumb-item::before {
+    content: "›";
+    color: #adb5bd;
+    padding: 0 4px;
+}
+
+.nav-separator {
+    color: #dee2e6;
+    margin: 0 4px;
+}
+
+/* ============================================================
+   TOP PANEL
+   ============================================================ */
+.top-panel {
+    display: flex;
+    gap: 20px;
+    margin-bottom: 20px;
+}
+
+.top-panel .scan-card {
+    flex: 0 0 380px;
+    min-width: 320px;
+}
+
+.top-panel .history-card {
+    flex: 1;
+    min-width: 0;
+}
+
+@media (max-width: 992px) {
+    .top-panel {
+        flex-direction: column;
+    }
+    .top-panel .scan-card {
+        flex: 1;
+        width: 100%;
+    }
+}
+
+@media (min-width: 1600px) {
+    .top-panel .scan-card {
+        flex: 0 0 420px;
+    }
+}
+
+/* ============================================================
+   LAYOUT
+   ============================================================ */
+.layout-wrapper {
+    display: flex;
+    gap: 20px;
+    margin-top: 20px;
+    min-height: 600px;
+}
+
+.main-content {
+    flex: 1;
+    min-width: 0;
+}
+
+/* ============================================================
+   HISTOGRAM WRAPPER SCROLL
+   ============================================================ */
+.histogram-wrapper-scroll {
+    overflow-y: auto;
+    max-height: 650px;
+    overflow-x: hidden;
+    padding-right: 5px;
+}
+
+.histogram-wrapper-scroll::-webkit-scrollbar {
+    width: 8px;
+}
+.histogram-wrapper-scroll::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 4px;
+}
+.histogram-wrapper-scroll::-webkit-scrollbar-thumb {
+    background: #c1c7cd;
+    border-radius: 4px;
+}
+.histogram-wrapper-scroll::-webkit-scrollbar-thumb:hover {
+    background: #a8b0b8;
+}
+
+/* ============================================================
+   CHART SECTIONS
+   ============================================================ */
+.chart-section {
+    background: #f8f9fa;
+    border-radius: 10px;
+    padding: 12px;
+    border: 1px solid #e0e0e0;
+    margin-bottom: 15px;
+}
+
+.chart-section .section-title {
+    font-size: 0.85rem;
     font-weight: 600;
-    white-space: nowrap;
+    color: #495057;
+    margin-bottom: 8px;
+    padding-bottom: 6px;
+    border-bottom: 2px solid #0d6efd;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
 }
 
-.btn-open-report:hover {
-    background: #6f42c1;
+.chart-section .section-title .path-text {
+    font-weight: 400;
+    color: #6c757d;
+    font-size: 0.8rem;
+    word-break: break-all;
+}
+
+.chart-section .chart-card {
+    background: white;
+    border-radius: 6px;
+    padding: 12px;
+    border: 1px solid #e9ecef;
+    margin-bottom: 8px;
+}
+
+.chart-section .chart-card:last-child {
+    margin-bottom: 0;
+}
+
+.chart-section .chart-card h6 {
+    color: #0d6efd;
+    font-size: 0.9rem;
+    margin-bottom: 8px;
+}
+
+.chart-section .chart-card .chart-wrapper {
+    width: 100%;
+    min-height: 250px;
+    overflow: visible;
+}
+
+.chart-section .chart-card .chart-wrapper .plotly-graph-div {
+    width: 100% !important;
+    height: 450px !important;
+}
+
+.chart-section.level-1 {
+    border-color: #fd7e14;
+}
+
+.chart-section.level-1 .section-title {
+    border-bottom-color: #fd7e14;
+}
+
+.chart-section.level-1 .section-title .badge {
+    background: #fd7e14;
     color: white;
-    transform: scale(1.05);
 }
 
-.btn-open-report i {
-    margin-right: 2px;
+.chart-section.level-1 .chart-card h6 {
+    color: #fd7e14;
+}
+
+.chart-section.level-2 {
+    border-color: #0d6efd;
+}
+
+.chart-section.level-2 .section-title {
+    border-bottom-color: #0d6efd;
+}
+
+.chart-section.level-2 .section-title .badge {
+    background: #0d6efd;
+    color: white;
+}
+
+.chart-section.level-2 .chart-card h6 {
+    color: #0d6efd;
 }
